@@ -18,7 +18,7 @@ typedef struct
    int alaw;
    pj_pool_t *pool;
    FILE *pipefd;   /* pipe fd to read */
-   FILE *wpipefd;  /* pipe fd to write */
+   pj_oshandle_t *wpipefd;
    pj_status_t (*cb)(pjmedia_port*, void*);
 } port_data;
 
@@ -87,7 +87,7 @@ static pj_status_t pipe_get_frame(pjmedia_port *port, pjmedia_frame *frame)
 
     if (!data->alaw) {
         /* If PCM just move data to frame buffer */
-        memcpy(samples, data->buffer, count);
+	    pj_memcpy(samples, data->buffer, count);
     } 
     else 
     {
@@ -167,6 +167,115 @@ PJ_DEF(pj_status_t) pjmedia_pipe_player_port_destroy(pjmedia_port *p_port)
     pj_thread_sleep(100);
     fclose(fd);
     
+    return PJ_SUCCESS;
+}
+
+
+/* Put a frame into pipe (Can block. WILL block!) */
+/* TODO: add a LARGE buffer to prevent block */
+static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
+{
+    port_data *data = port->port_data.pdata;
+    pj_int16_t *samples = frame->buf;
+    pj_ssize_t count = 0;
+    pj_status_t status = 0;
+    count = frame->size; /* bytes in frame */
+
+    if (data->buffer == NULL && data->alaw) {
+       data->buffer = pj_pool_zalloc(data->pool, sizeof(frame->size) + 16);
+    }
+
+    PJ_ASSERT_RETURN(data != NULL && data->wpipefd != NULL, PJ_EINVAL);
+
+    if (frame->type != PJMEDIA_FRAME_TYPE_AUDIO) return PJ_SUCCESS;
+    if (!data->alaw) {
+        /* If PCM just move data to temp buffer */
+	    pj_memcpy(data->buffer, samples, count);
+    }
+    else 
+    {
+        /* If alaw convert pcm data to temp buffer */
+        count = count / 2;
+        for (int i=0; i<count; i++) {
+            data->buffer[i] = pjmedia_linear2alaw(samples[i]);
+        }
+    }
+
+    /* Write temp buffer to pipe */
+    status = pj_file_write(data->wpipefd, data->buffer, &count);
+    return status;
+}
+
+
+/* Get frame, basicy is a no-op operation */
+static pj_status_t wpipe_get_frame(pjmedia_port *port, pjmedia_frame *frame)
+{
+    PJ_UNUSED_ARG(port);
+    PJ_UNUSED_ARG(frame);
+    return PJ_EINVALIDOP;
+}
+
+/* Close the port, modify file header with updated file length */
+static pj_status_t wpipe_on_destroy(pjmedia_port *port)
+{
+    pj_status_t status;
+    port_data *data = port->port_data.pdata;
+    PJ_ASSERT_RETURN(data != NULL && data->wpipefd != NULL, PJ_EINVAL);
+    status = pj_file_close(data->wpipefd);
+	return status;
+}
+
+
+PJ_DEF(pj_status_t) pjmedia_pipe_writer_port_create( pj_pool_t *pool,
+						     const char *filename,
+						     unsigned sampling_rate,
+						     unsigned channel_count,
+						     unsigned samples_per_frame,
+						     unsigned bits_per_sample,
+						     unsigned alaw,
+						     pj_ssize_t buff_size,
+						     pjmedia_port **p_port )
+{
+    pj_str_t name;
+    pj_status_t status;
+    pjmedia_port *port;
+    port_data *data = NULL;
+
+    PJ_ASSERT_RETURN(pool && filename && p_port, PJ_EINVAL);
+    PJ_ASSERT_RETURN(bits_per_sample == 16, PJ_EINVAL);
+
+    /* Create media port instance. */
+    port = pj_pool_zalloc(pool, sizeof(pjmedia_port));
+    PJ_ASSERT_RETURN(port != NULL, PJ_ENOMEM);
+
+    /* Initialize port info */
+    pj_strdup2(pool, &name, filename);
+    pjmedia_port_info_init(&port->info, &name, PJMEDIA_SIG_CLASS_PORT_AUD('s', 'i'),
+			   sampling_rate, channel_count, bits_per_sample,
+			   samples_per_frame);
+
+    port->get_frame = &wpipe_get_frame;
+    port->put_frame = &wpipe_put_frame;
+    port->on_destroy = &wpipe_on_destroy;
+    port->port_data.pdata = data = pj_pool_zalloc(pool, sizeof(port_data));
+    PJ_ASSERT_RETURN(data != NULL, PJ_ENOMEM);
+
+    status = pj_file_open(pool, filename, PJ_O_WRONLY, data->wpipefd);
+    if (status != PJ_SUCCESS)
+	return status;
+
+    data->alaw = alaw;
+    data->pool = pool;
+    data->buffer = NULL;
+    
+    *p_port = port;
+    PJ_LOG(4,(THIS_FILE, 
+	      "File writer '%.*s' opened: samp.rate=%d, alaw?: %d",
+	      (int)port->info.name.slen,
+	      port->info.name.ptr,
+	      PJMEDIA_PIA_SRATE(&port->info),
+	      alaw));
+
     return PJ_SUCCESS;
 }
 

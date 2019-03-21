@@ -207,7 +207,7 @@ class PJSIP_build_ext(build_ext):
 
     def cython_sources(self, sources, extension):
         log.info("Compiling Cython extension %s" % extension.name)
-        if extension.name == "sipsimple.core._core":
+        if extension.name == "sipsimple.core._core" or extension.name == "sipsimple.util.PJMEdiaPort":
             self.build_dir = os.path.join(self.build_temp, "pjsip")
             if self.pjsip_clean_compile:
                 self.clean_pjsip()

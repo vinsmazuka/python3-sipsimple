@@ -1125,6 +1125,7 @@ class Session(object):
                     # OK, but we cannot really start the stream. -Saul
                     stream.start(local_sdp, remote_sdp, index)
                 else:
+                    # Removed stream!
                     notification_center.remove_observer(self, sender=stream)
                     self.proposed_streams.remove(stream)
                     del stream_map[stream.index]

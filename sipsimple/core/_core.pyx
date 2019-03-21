@@ -2,6 +2,7 @@
 include "_core.error.pxi"
 include "_core.lib.pxi"
 include "_core.sound.pxi"
+include "_core.pipe.pxi"
 include "_core.video.pxi"
 include "_core.util.pxi"
 
@@ -27,7 +28,7 @@ CORE_REVISION = 181
 
 __all__ = ["PJ_VERSION", "PJ_SVN_REVISION", "CORE_REVISION",
            "SIPCoreError", "PJSIPError", "PJSIPTLSError", "SIPCoreInvalidStateError",
-           "AudioMixer", "ToneGenerator", "RecordingWaveFile", "WaveFile", "MixerPort",
+           "AudioMixer", "ToneGenerator", "RecordingWaveFile", "WaveFile", "MixerPort", "PipeFile", "RecordingPipeFile"
            "VideoCamera", "FrameBufferVideoRenderer",
            "sip_status_messages",
            "BaseCredentials", "Credentials", "FrozenCredentials", "BaseSIPURI", "SIPURI", "FrozenSIPURI",

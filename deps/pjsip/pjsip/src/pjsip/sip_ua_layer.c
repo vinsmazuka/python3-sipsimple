@@ -580,6 +580,14 @@ static struct dlg_set *find_dlg_set_for_msg( pjsip_rx_data *rdata )
     }
 }
 
+
+PJ_DEF_DATA(const pjsip_method) pjsip_info_method =
+{
+    PJSIP_OTHER_METHOD,
+    { "INFO", 4 }
+};
+
+
 /* On received requests. */
 static pj_bool_t mod_ua_on_rx_request(pjsip_rx_data *rdata)
 {
@@ -626,6 +634,11 @@ retry_on_deadlock:
 					   NULL, NULL );
 	}
 	return PJ_TRUE;
+    }
+
+    // Move in-dialog INFO request out of dialog
+    if (pjsip_method_cmp(&rdata->msg_info.msg->line.req.method, &pjsip_info_method)==0) {
+        return PJ_FALSE;
     }
 
     /* Dialog set has been found.

@@ -9,6 +9,10 @@ cdef extern from "mediaport.c":
     int pjmedia_pipe_player_set_eof_cb(pjmedia_port *port, void *user_data,
                                       int cb(pjmedia_port *port, void *usr_data) with gil) nogil
 
+    int pjmedia_pipe_writer_port_create(pj_pool_t *pool, const char *filename,
+                                      unsigned int sampling_rate, int channel_count,
+						              unsigned samples_per_frame, unsigned bits_per_sample,
+						              unsigned flags, unsigned int buff_size, pjmedia_port **p_port) nogil
 
 cdef class PipeFile:
     cdef object __weakref__
@@ -155,7 +159,7 @@ cdef class PipeFile:
                 if status != 0:
                     raise PJSIPError("Could not open pipe file", status)
                 with nogil:
-                    # wav cb setter is ok for pipe
+                    # pipe cb setter is ok for pipe
                     status = pjmedia_pipe_player_set_eof_cb(self._port, weakref, cb_play_pipe_eof)
                 if status != 0:
                     raise PJSIPError("Could not set pipe EOF callback", status)
@@ -248,6 +252,154 @@ cdef class PipeFile:
         finally:
             with nogil:
                 pj_mutex_unlock(lock)
+
+
+cdef class RecordingPipeFile:
+    cdef int _slot
+    cdef int _was_started
+    cdef pj_mutex_t *_lock
+    cdef pj_pool_t *_pool
+    cdef pjmedia_port *_port
+    cdef readonly str filename
+    cdef readonly AudioMixer mixer
+    cdef readonly int alaw
+
+    def __cinit__(self, *args, **kwargs):
+        cdef int status
+
+        status = pj_mutex_create_recursive(_get_ua()._pjsip_endpoint._pool, "recording_pipe_file_lock", &self._lock)
+        if status != 0:
+            raise PJSIPError("failed to create lock", status)
+
+        self._slot = -1
+
+    def __init__(self, AudioMixer mixer, filename, alaw):
+        if self.filename is not None:
+            raise SIPCoreError("RecordingPipeFile.__init__() was already called")
+        if mixer is None:
+            raise ValueError("mixer argument may not be None")
+        if filename is None:
+            raise ValueError("filename argument may not be None")
+        if not isinstance(filename, basestring):
+            raise TypeError("file argument must be str or unicode")
+        if isinstance(filename, unicode):
+            filename = filename.encode(sys.getfilesystemencoding())
+        self.mixer = mixer
+        self.filename = filename
+        self.alaw = alaw
+
+    cdef PJSIPUA _check_ua(self):
+        cdef PJSIPUA ua
+        try:
+            ua = _get_ua()
+            return ua
+        except:
+            self._pool = NULL
+            self._port = NULL
+            self._slot = -1
+            return None
+
+    property is_active:
+
+        def __get__(self):
+            self._check_ua()
+            return self._slot != -1
+
+    property slot:
+
+        def __get__(self):
+            self._check_ua()
+            if self._slot == -1:
+                return None
+            else:
+                return self._slot
+
+    def start(self):
+        cdef char *filename
+        cdef int sample_rate
+        cdef int status
+        cdef pj_mutex_t *lock = self._lock
+        cdef pj_pool_t *pool
+        cdef pjmedia_port **port_address
+        cdef bytes pool_name
+        cdef char* c_pool_name
+        cdef PJSIPUA ua
+
+        ua = _get_ua()
+
+        with nogil:
+            status = pj_mutex_lock(lock)
+        if status != 0:
+            raise PJSIPError("failed to acquire lock", status)
+        try:
+            filename = PyString_AsString(self.filename)
+            pool_name = b"RecordingPipeFile_%d" % id(self)
+            port_address = &self._port
+            sample_rate = self.mixer.sample_rate
+
+            if self._was_started:
+                raise SIPCoreError("This RecordingPipeFile was already started once")
+            pool = ua.create_memory_pool(pool_name, 4096, 4096)
+            self._pool = pool
+            try:
+                with nogil:
+                    status = pjmedia_pipe_writer_port_create(pool, filename,
+                                                            sample_rate, 1,
+                                                            sample_rate / 50, 16,
+                                                            self.alaw, 0, port_address)
+                if status != 0:
+                    raise PJSIPError("Could not open pipe file", status)
+                self._slot = self.mixer._add_port(ua, self._pool, self._port)
+            except:
+                self.stop()
+                raise
+            self._was_started = 1
+        finally:
+            with nogil:
+                pj_mutex_unlock(lock)
+
+    def stop(self):
+        cdef int status
+        cdef pj_mutex_t *lock = self._lock
+        cdef PJSIPUA ua
+
+        ua = self._check_ua()
+
+        with nogil:
+            status = pj_mutex_lock(lock)
+        if status != 0:
+            raise PJSIPError("failed to acquire lock", status)
+        try:
+            self._stop(ua)
+        finally:
+            with nogil:
+                pj_mutex_unlock(lock)
+
+    cdef int _stop(self, PJSIPUA ua) except -1:
+        cdef pjmedia_port *port = self._port
+
+        if self._slot != -1:
+            self.mixer._remove_port(ua, self._slot)
+            self._slot = -1
+        if self._port != NULL:
+            with nogil:
+                pjmedia_port_destroy(port)
+            self._port = NULL
+        ua.release_memory_pool(self._pool)
+        self._pool = NULL
+        return 0
+
+    def __dealloc__(self):
+        cdef PJSIPUA ua
+        try:
+            ua = _get_ua()
+        except:
+            return
+        self._stop(ua)
+
+        if self._lock != NULL:
+            pj_mutex_destroy(self._lock)
+
 
 
 cdef int cb_play_pipe_eof(pjmedia_port *port, void *user_data) with gil:

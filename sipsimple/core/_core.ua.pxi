@@ -78,6 +78,7 @@ cdef class PJSIPUA:
         cdef list accept_types
         cdef int status
         cdef PJSTR message_method = PJSTR("MESSAGE")
+        cdef PJSTR info_method = PJSTR("INFO")
         cdef PJSTR refer_method = PJSTR("REFER")
         cdef PJSTR str_norefersub = PJSTR("norefersub")
         cdef PJSTR str_gruu = PJSTR("gruu")
@@ -115,6 +116,12 @@ cdef class PJSIPUA:
                                             PJSIP_H_ALLOW, NULL, 1, &message_method.pj_str)
         if status != 0:
             raise PJSIPError("Could not add MESSAGE method to supported methods", status)
+
+        status = pjsip_endpt_add_capability(self._pjsip_endpoint._obj, &self._module,
+                                            PJSIP_H_ALLOW, NULL, 1, &info_method.pj_str)
+        if status != 0:
+            raise PJSIPError("Could not add INFO method to supported methods", status)
+
         status = pjsip_endpt_add_capability(self._pjsip_endpoint._obj, &self._module,
                                             PJSIP_H_ALLOW, NULL, 1, &refer_method.pj_str)
         if status != 0:
@@ -189,6 +196,7 @@ cdef class PJSIPUA:
             if method in ("ACK", "BYE", "INVITE", "REFER", "SUBSCRIBE"):
                 raise ValueError('Handling incoming "%s" requests is not allowed' % method)
             self._incoming_requests.add(method)
+        self._incoming_requests.add(info_method)
         self.rtp_port_range = kwargs["rtp_port_range"]
         self.zrtp_cache = kwargs["zrtp_cache"]
         pj_stun_config_init(&self._stun_cfg, &self._caching_pool._obj.factory, 0,
