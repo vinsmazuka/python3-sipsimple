@@ -3,7 +3,7 @@
 #include <sys/stat.h> 
 #include <fcntl.h>
 
-#define THIS_FILE   "pjs_pipe_port.c"
+#define THIS_FILE   "writer.c"
 
 /* EXPORTED: Open pipe for non-buffered writes */
 __attribute__ ((visibility ("default")))
