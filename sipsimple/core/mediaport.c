@@ -187,7 +187,7 @@ static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
     fsize = frame->size; /* bytes in frame */
     scount = fsize / 2;  /* 16 bit samples in frame */
 
-    if (data->buffer == NULL && data->alaw) {
+    if (data->buffer == NULL) {
        data->buffer = pj_pool_zalloc(data->pool, data->fsize+16);
     }
     PJ_ASSERT_RETURN(data->buffer != NULL, PJ_ENOMEM);
@@ -207,6 +207,7 @@ static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
 
     /* Write temp buffer to pipe */
     status = pj_file_write(data->wpipefd, data->buffer, &fsize);
+    printf("Wrote %d bytes to pipe\n", (int)fsize);
     return status;
 }
 
@@ -225,6 +226,7 @@ static pj_status_t wpipe_on_destroy(pjmedia_port *port)
     pj_status_t status;
     port_data *data = port->port_data.pdata;
     PJ_ASSERT_RETURN(data != NULL && data->wpipefd != NULL, PJ_EINVAL);
+    printf("pipe_writer_port destroy called\n");
     status = pj_file_close(data->wpipefd);
 	return status;
 }
