@@ -6,6 +6,7 @@
 #include <time.h>
 #include <sys/stat.h> 
 #include <fcntl.h>
+#include <unistd.h>
 
 #define THIS_FILE "pjs_pipe_port.c"
 #define USEC_IN_SEC (pj_uint64_t)1000000
@@ -19,7 +20,7 @@ typedef struct
    int alaw;
    pj_pool_t *pool;
    FILE *pipefd;   /* pipe fd to read */
-   pj_oshandle_t wpipefd;
+   int wpipefd;
    pj_status_t (*cb)(pjmedia_port*, void*);
 } port_data;
 
@@ -176,13 +177,13 @@ PJ_DEF(pj_status_t) pjmedia_pipe_player_port_destroy(pjmedia_port *p_port)
 /* TODO: add a LARGE buffer to prevent block */
 static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
 {
+    ssize_t written = 0;
     port_data *data = port->port_data.pdata;
     pj_int16_t *samples = frame->buf;
     pj_ssize_t fsize = 0;
     pj_ssize_t scount = 0;
-    pj_status_t status = 0;
 
-    PJ_ASSERT_RETURN(data != NULL && data->wpipefd != NULL, PJ_EINVAL);
+    PJ_ASSERT_RETURN(data != NULL && data->wpipefd >= 0, PJ_EINVAL);
 
     fsize = frame->size; /* bytes in frame */
     scount = fsize / 2;  /* 16 bit samples in frame */
@@ -206,9 +207,11 @@ static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
     }
 
     /* Write temp buffer to pipe */
-    status = pj_file_write(data->wpipefd, data->buffer, &fsize);
-    printf("Wrote %d bytes to pipe\n", (int)fsize);
-    return status;
+    written = write(data->wpipefd, data->buffer, fsize);
+    fsync(data->wpipefd);
+
+    printf("Wrote %d bytes to pipe\n", (int)written);
+    return PJ_SUCCESS;
 }
 
 
@@ -223,12 +226,11 @@ static pj_status_t wpipe_get_frame(pjmedia_port *port, pjmedia_frame *frame)
 /* Close the port, modify file header with updated file length */
 static pj_status_t wpipe_on_destroy(pjmedia_port *port)
 {
-    pj_status_t status;
     port_data *data = port->port_data.pdata;
-    PJ_ASSERT_RETURN(data != NULL && data->wpipefd != NULL, PJ_EINVAL);
+    PJ_ASSERT_RETURN(data != NULL && data->wpipefd >= 0, PJ_EINVAL);
     printf("pipe_writer_port destroy called\n");
-    status = pj_file_close(data->wpipefd);
-	return status;
+    if (close(data->wpipefd) < 0) return PJ_EINVAL;
+	return PJ_SUCCESS;
 }
 
 
@@ -243,7 +245,6 @@ PJ_DEF(pj_status_t) pjmedia_pipe_writer_port_create( pj_pool_t *pool,
 						     pjmedia_port **p_port )
 {
     pj_str_t name;
-    pj_status_t status;
     pjmedia_port *port;
     port_data *data = NULL;
 
@@ -267,9 +268,9 @@ PJ_DEF(pj_status_t) pjmedia_pipe_writer_port_create( pj_pool_t *pool,
     PJ_ASSERT_RETURN(data != NULL, PJ_ENOMEM);
 
     /* Open pipe for writing */
-    status = pj_file_open(pool, filename, PJ_O_WRONLY, &data->wpipefd);
-    if (status != PJ_SUCCESS)
-	return status;
+    data->wpipefd = open(filename, O_WRONLY | O_DSYNC);
+    if (data->wpipefd < 0)
+	return PJ_ENOTFOUND;
 
     /* Init private data chunk */
     data->alaw = alaw;
