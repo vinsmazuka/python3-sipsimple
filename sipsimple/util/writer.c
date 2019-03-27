@@ -9,6 +9,7 @@
 __attribute__ ((visibility ("default")))
 int open_pipe_port(char *path)
 {
+   printf("PJWriter opened for write %s\n", path);
    return open(path, O_WRONLY | O_DSYNC);
 }
 
@@ -17,6 +18,7 @@ int open_pipe_port(char *path)
 __attribute__ ((visibility ("default")))
 int close_pipe_port(int fd)
 {
+   printf("PJWriter closed file \n");
    return close(fd);
 }
 
@@ -27,6 +29,7 @@ int write_pipe_port(int fd, char *samples, unsigned int count)
 {
    int ret = write(fd, samples, count);
    fsync(fd);
+   printf("PJWriter wrote %d bytes\n", ret);
    return ret;
 }
 

@@ -22,6 +22,7 @@ typedef struct
    FILE *pipefd;   /* pipe fd to read */
    int wpipefd;
    pj_status_t (*cb)(pjmedia_port*, void*);
+   char filename[255];
 } port_data;
 
 /*
@@ -47,8 +48,10 @@ static int pipe_read_data(void *buffer, unsigned count, port_data *data)
     pj_size_t rscount = 0;
     
     rcount = fread(buffer, 1, count, data->pipefd);
+    printf("Pipefile read %d bytes from %s\n", (int)rcount, data->filename);
     while (rcount < count) {
         rscount = fread(buffer + rcount, 1, count - rcount, data->pipefd);
+        printf("Pipefile readext %d bytes from %s\n", (int)rscount, data->filename);
         if (rscount <= 0) return 0;
         rcount += rscount;
     }
@@ -146,11 +149,13 @@ PJ_DEF(pj_status_t) pjmedia_pipe_player_port_create(pj_pool_t *pool, const char 
     data->alaw = alaw;
     data->pool = pool;
     data->buffer = NULL;
+    strncpy(data->filename, filename, 254);
     if (data->pipefd == NULL) 
         return PJ_ENOTFOUND;
 
     *p_port = port;
 
+    printf("PipeFile opened pipe for reading %s\n", filename);
     return PJ_SUCCESS;
 }
 
@@ -210,7 +215,7 @@ static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
     written = write(data->wpipefd, data->buffer, fsize);
     fsync(data->wpipefd);
 
-    printf("Wrote %d bytes to pipe\n", (int)written);
+    printf("RecodingPipe wrote %d bytes to pipe %s\n", (int)written, data->filename);
     return PJ_SUCCESS;
 }
 
@@ -277,10 +282,11 @@ PJ_DEF(pj_status_t) pjmedia_pipe_writer_port_create( pj_pool_t *pool,
     data->pool = pool;
     data->buffer = NULL;
     data->fsize = bits_per_sample * samples_per_frame;
+    strncpy(data->filename, filename, 254);
 
     *p_port = port;
     PJ_LOG(4,(THIS_FILE, 
-	      "Pipe writer '%.*s' opened pipe: samp.rate=%d, alaw?: %d",
+	      "RecordingPipe '%.*s' opened pipe for write: samp.rate=%d, alaw?: %d",
 	      (int)port->info.name.slen,
 	      port->info.name.ptr,
 	      PJMEDIA_PIA_SRATE(&port->info),

@@ -9,6 +9,7 @@
 __attribute__ ((visibility ("default")))
 int open_rpipe_port(char *path)
 {
+   printf("PJReader opened for read file %s\n", path);
    return open(path, O_RDONLY | O_DSYNC);
 }
 
@@ -17,6 +18,7 @@ int open_rpipe_port(char *path)
 __attribute__ ((visibility ("default")))
 int close_rpipe_port(int fd)
 {
+   printf("PJReader closed file\n");
    return close(fd);
 }
 
@@ -26,6 +28,7 @@ __attribute__ ((visibility ("default")))
 int read_rpipe_port(int fd, char *samples, unsigned int count)
 {
    int ret = read(fd, samples, count);
+   printf("PJReader read %d bytes\n", ret);
    return ret;
 }
 
