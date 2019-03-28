@@ -48,10 +48,10 @@ static int pipe_read_data(void *buffer, unsigned count, port_data *data)
     pj_size_t rscount = 0;
     
     rcount = fread(buffer, 1, count, data->pipefd);
-    printf("Pipefile read %d bytes from %s\n", (int)rcount, data->filename);
+    //printf("Pipefile read %d bytes from %s\n", (int)rcount, data->filename);
     while (rcount < count) {
         rscount = fread(buffer + rcount, 1, count - rcount, data->pipefd);
-        printf("Pipefile readext %d bytes from %s\n", (int)rscount, data->filename);
+        //printf("Pipefile readext %d bytes from %s\n", (int)rscount, data->filename);
         if (rscount <= 0) return 0;
         rcount += rscount;
     }
@@ -155,7 +155,7 @@ PJ_DEF(pj_status_t) pjmedia_pipe_player_port_create(pj_pool_t *pool, const char 
 
     *p_port = port;
 
-    printf("PipeFile opened pipe for reading %s\n", filename);
+    // printf("PipeFile opened pipe for reading %s\n", filename);
     return PJ_SUCCESS;
 }
 
@@ -213,9 +213,9 @@ static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
 
     /* Write temp buffer to pipe */
     written = write(data->wpipefd, data->buffer, fsize);
-    fsync(data->wpipefd);
+    if (written > 0) fsync(data->wpipefd);
 
-    printf("RecodingPipe wrote %d bytes to pipe %s\n", (int)written, data->filename);
+    // printf("RecodingPipe wrote %d bytes to pipe %s\n", (int)written, data->filename);
     return PJ_SUCCESS;
 }
 
@@ -233,7 +233,7 @@ static pj_status_t wpipe_on_destroy(pjmedia_port *port)
 {
     port_data *data = port->port_data.pdata;
     PJ_ASSERT_RETURN(data != NULL && data->wpipefd >= 0, PJ_EINVAL);
-    printf("pipe_writer_port destroy called\n");
+    // printf("pipe_writer_port destroy called\n");
     if (close(data->wpipefd) < 0) return PJ_EINVAL;
 	return PJ_SUCCESS;
 }

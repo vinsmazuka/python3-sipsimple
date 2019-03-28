@@ -5,7 +5,7 @@ import sys
 cdef extern from "writer.c" nogil:
     int open_pipe_port(char *path)
     int close_pipe_port(int fd)
-    int write_pipe_port(int fd, void *samples, unsigned int count)
+    int write_pipe_port(int fd, char *samples, unsigned int count)
 
 cdef class PJWriter:
     cdef int fd

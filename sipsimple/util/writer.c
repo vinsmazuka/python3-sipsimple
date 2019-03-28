@@ -5,31 +5,28 @@
 
 #define THIS_FILE   "writer.c"
 
-/* EXPORTED: Open pipe for non-buffered writes */
-__attribute__ ((visibility ("default")))
+/* Open pipe for non-buffered writes */
 int open_pipe_port(char *path)
 {
-   printf("PJWriter opened for write %s\n", path);
+   //printf("PJWriter opened for write %s\n", path);
    return open(path, O_WRONLY | O_DSYNC);
 }
 
 
-/* EXPORTED: Close pipe for non-buffered writes */
-__attribute__ ((visibility ("default")))
+/* Close pipe for non-buffered writes */
 int close_pipe_port(int fd)
 {
-   printf("PJWriter closed file \n");
+   //printf("PJWriter closed file \n");
    return close(fd);
 }
 
 
-/* EXPORTED: Writes samples into pipe without caching */
-__attribute__ ((visibility ("default")))
+/* Writes samples into pipe without caching */
 int write_pipe_port(int fd, char *samples, unsigned int count)
 {
    int ret = write(fd, samples, count);
    fsync(fd);
-   printf("PJWriter wrote %d bytes\n", ret);
+   //printf("PJWriter wrote %d bytes\n", ret);
    return ret;
 }
 

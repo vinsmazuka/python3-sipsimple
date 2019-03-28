@@ -5,30 +5,27 @@
 
 #define THIS_FILE   "reader.c"
 
-/* EXPORTED: Open pipe for non-buffered writes */
-__attribute__ ((visibility ("default")))
+/* Open pipe for non-buffered writes */
 int open_rpipe_port(char *path)
 {
-   printf("PJReader opened for read file %s\n", path);
-   return open(path, O_RDONLY | O_DSYNC);
+   //printf("PJReader opened for read file %s\n", path);
+   return open(path, O_RDONLY);
 }
 
 
-/* EXPORTED: Close pipe for non-buffered writes */
-__attribute__ ((visibility ("default")))
+/* Close pipe for non-buffered writes */
 int close_rpipe_port(int fd)
 {
-   printf("PJReader closed file\n");
+   //printf("PJReader closed file\n");
    return close(fd);
 }
 
 
-/* EXPORTED: Writes samples into pipe without caching */
-__attribute__ ((visibility ("default")))
+/* Read samples from pipe */
 int read_rpipe_port(int fd, char *samples, unsigned int count)
 {
    int ret = read(fd, samples, count);
-   printf("PJReader read %d bytes\n", ret);
+   //printf("PJReader read %d bytes\n", ret);
    return ret;
 }
 

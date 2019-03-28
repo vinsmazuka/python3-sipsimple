@@ -5,7 +5,7 @@ import sys
 cdef extern from "reader.c" nogil:
     int open_rpipe_port(char *path)
     int close_rpipe_port(int fd)
-    int read_rpipe_port(int fd, void *samples, unsigned int count)
+    int read_rpipe_port(int fd, char *samples, unsigned int count)
 
 cdef class PJReader:
     cdef int fd
