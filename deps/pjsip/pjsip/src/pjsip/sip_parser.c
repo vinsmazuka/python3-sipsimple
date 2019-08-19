@@ -926,7 +926,7 @@ PJ_DEF(pjsip_from_hdr *) pjsip_parse_fromto( pj_pool_t *pool,
     }
     PJ_END;
 
-    while ( scanner.curptr == ';' ) {
+    while ( *scanner.curptr == ';' ) {
 	pj_str_t pname, pvalue;
 
 	int_parse_param( &scanner, pool, &pname, &pvalue, 0);
