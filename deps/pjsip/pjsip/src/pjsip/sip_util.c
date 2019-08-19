@@ -337,7 +337,9 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	    status = PJSIP_EINVALIDHDR;
 	    goto on_error;
 	}
-	pj_create_unique_string(tdata->pool, &from->tag);
+	
+	if (from->tag.slen == 0)
+	    pj_create_unique_string(tdata->pool, &from->tag);
 
 	/* To */
 	to = pjsip_to_hdr_create(tdata->pool);
