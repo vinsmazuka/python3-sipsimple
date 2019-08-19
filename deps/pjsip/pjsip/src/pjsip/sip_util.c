@@ -329,8 +329,10 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	/* From */
 	from = pjsip_from_hdr_create(tdata->pool);
 	pj_strdup_with_null(tdata->pool, &tmp, param_from);
-	from->uri = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 
-				     PJSIP_PARSE_URI_AS_NAMEADDR);
+	pjsip_parse_fromto(tdata->pool, tmp.ptr, tmp.slen, from);
+	
+//	from->uri = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 
+//				     PJSIP_PARSE_URI_AS_NAMEADDR);
 	if (from->uri == NULL) {
 	    status = PJSIP_EINVALIDHDR;
 	    goto on_error;
@@ -340,8 +342,10 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	/* To */
 	to = pjsip_to_hdr_create(tdata->pool);
 	pj_strdup_with_null(tdata->pool, &tmp, param_to);
-	to->uri = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 
-				   PJSIP_PARSE_URI_AS_NAMEADDR);
+	pjsip_parse_fromto(tdata->pool, tmp.ptr, tmp.slen, to);
+	
+//	to->uri = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 
+//				   PJSIP_PARSE_URI_AS_NAMEADDR);
 	if (to->uri == NULL) {
 	    status = PJSIP_EINVALIDHDR;
 	    goto on_error;

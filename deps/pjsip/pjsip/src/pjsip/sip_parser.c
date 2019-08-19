@@ -904,6 +904,56 @@ PJ_DEF(pjsip_uri*) pjsip_parse_uri( pj_pool_t *pool,
     return NULL;
 }
 
+/* Public function to parse FROM/TO header */
+PJ_DEF(pjsip_from_hdr *) pjsip_parse_fromto( pj_pool_t *pool, 
+					char *buf, pj_size_t size,
+					pjsip_from_hdr *hdr)
+{
+    pj_scanner scanner;
+    pjsip_uri *uri = NULL;
+    PJ_USE_EXCEPTION;
+
+    if (hdr == NULL) return NULL;
+    pj_scan_init(&scanner, buf, size, 0, &on_syntax_error);
+
+    
+    PJ_TRY {
+	hdr->uri = int_parse_uri_or_name_addr(&scanner, pool, PJSIP_PARSE_URI_AS_NAMEADDR |
+					  PJSIP_PARSE_URI_IN_FROM_TO_HDR);
+    }
+    PJ_CATCH_ANY {
+	hdr->uri = NULL;
+    }
+    PJ_END;
+
+    while ( scanner.curptr == ';' ) {
+	pj_str_t pname, pvalue;
+
+	int_parse_param( &scanner, pool, &pname, &pvalue, 0);
+
+	if (!parser_stricmp(pname, pconst.pjsip_TAG_STR)) {
+	    hdr->tag = pvalue;
+	    
+	} else {
+	    pjsip_param *p = PJ_POOL_ALLOC_T(pool, pjsip_param);
+	    p->name = pname;
+	    p->value = pvalue;
+	    pj_list_insert_before(&hdr->other_param, p);
+	}
+    }
+
+    /* Must have exhausted all inputs. */
+    if (pj_scan_is_eof(&scanner) || IS_NEWLINE(*scanner.curptr)) {
+	/* Success. */
+	pj_scan_fini(&scanner);
+	return hdr;
+    }
+
+    /* Still have some characters unparsed. */
+    pj_scan_fini(&scanner);
+    return NULL;
+}
+
 /* SIP version */
 static void parse_sip_version(pj_scanner *scanner)
 {

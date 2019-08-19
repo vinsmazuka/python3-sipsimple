@@ -63,6 +63,7 @@ static int pipe_read_data(void *buffer, unsigned count, port_data *data)
 /* Get new frame from pipe */
 static pj_status_t pipe_get_frame(pjmedia_port *port, pjmedia_frame *frame)
 {
+    int i = 0;
     port_data *data = port->port_data.pdata;
     pj_int16_t *samples = frame->buf;
     pj_size_t count = 0;
@@ -97,7 +98,7 @@ static pj_status_t pipe_get_frame(pjmedia_port *port, pjmedia_frame *frame)
     else 
     {
         /* If alaw convert data to frame buffer */
-        for (int i=0; i<count; i++) {
+        for (i=0; i<count; i++) {
             samples[i] = pjmedia_alaw2linear(data->buffer[i]);
         }
     }
@@ -182,6 +183,7 @@ PJ_DEF(pj_status_t) pjmedia_pipe_player_port_destroy(pjmedia_port *p_port)
 /* TODO: add a LARGE buffer to prevent block */
 static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
 {
+    int i = 0;
     ssize_t written = 0;
     port_data *data = port->port_data.pdata;
     pj_int16_t *samples = frame->buf;
@@ -207,7 +209,7 @@ static pj_status_t wpipe_put_frame(pjmedia_port *port, pjmedia_frame *frame)
     {
         /* If ALAW convert PCM data to temp buffer sample by sample */
         fsize = scount;
-        for (int i=0; i<scount; i++)
+        for (i=0; i<scount; i++)
             data->buffer[i] = pjmedia_linear2alaw(samples[i]);
     }
 

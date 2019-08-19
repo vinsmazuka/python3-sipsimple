@@ -189,6 +189,23 @@ PJ_DECL(pjsip_uri*) pjsip_parse_uri( pj_pool_t *pool,
 				     char *buf, pj_size_t size,
 				     unsigned options);
 
+
+/**
+ * Parse an From/To header in the input and return the correct instance of header.
+ *
+ * @param pool		The pool to get memory allocations.
+ * @param buf		The input buffer, which MUST be NULL terminated.
+ * @param size		The length of the string (not counting NULL terminator).
+ * @param hdr		From/To header to populate
+ * @return		The header or NULL when failed. No exception is thrown by 
+ *			this function (or any public parser functions).
+ */
+ 
+PJ_DEF(pjsip_from_hdr *) pjsip_parse_fromto( pj_pool_t *pool,
+				     char *buf, pj_size_t size,
+				     pjsip_from_hdr *hdr);
+
+
 /**
  * Parse SIP status line.
  *
