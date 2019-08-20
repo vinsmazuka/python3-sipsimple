@@ -139,8 +139,8 @@ cdef class Request:
             # Trying to inc & get cseq from inv._dialog
             with nogil:
                 pjsip_dlg_inc_lock(inv._dialog);
-            inv._dialog.local.cseq += 1
             self.cseq = inv._dialog.local.cseq;
+            inv._dialog.local.cseq += 1
 
         status = pjsip_endpt_create_request(ua._pjsip_endpoint._obj, &method_pj, &request_uri_str.pj_str,
                                             &from_header_str.pj_str, &to_header_str.pj_str, contact_header_pj,
