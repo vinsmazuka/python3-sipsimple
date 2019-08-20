@@ -67,7 +67,7 @@ cdef class Request:
 
     def __init__(self, method, SIPURI request_uri not None, FromHeader from_header not None, ToHeader to_header not None,
                  RouteHeader route_header not None, Credentials credentials=None, ContactHeader contact_header=None, call_id=None, cseq=None,
-                 object extra_headers=None, content_type=None, body=None):
+                 object extra_headers=None, content_type=None, body=None, Invitation inv=None):
         cdef pjsip_method method_pj
         cdef PJSTR from_header_str
         cdef PJSTR to_header_str
@@ -134,9 +134,22 @@ cdef class Request:
             self._content_type = PJSTR(content_type_spl[0])
             self._content_subtype = PJSTR(content_type_spl[1])
             self._body = PJSTR(body)
+
+        if inv is not None and inv._dialog != NULL:
+            # Trying to inc & get cseq from inv._dialog
+            with nogil:
+                pjsip_dlg_inc_lock(inv._dialog);
+            inv._dialog.local.cseq += 1
+            self.cseq = inv._dialog.local.cseq;
+
         status = pjsip_endpt_create_request(ua._pjsip_endpoint._obj, &method_pj, &request_uri_str.pj_str,
                                             &from_header_str.pj_str, &to_header_str.pj_str, contact_header_pj,
                                             call_id_pj, self.cseq, NULL, &self._tdata)
+
+        if inv is not None and inv._dialog != NULL:
+            with nogil:
+                pjsip_dlg_dec_lock(inv._dialog);
+
         if status != 0:
             raise PJSIPError("Could not create request", status)
         if body is not None:

@@ -1253,6 +1253,8 @@ cdef extern from "pjsip.h":
     struct pjsip_dlg_party:
         pjsip_contact_hdr *contact
         pjsip_fromto_hdr *info
+        int first_cseq;
+        int cseq;
     struct pjsip_dialog:
         pjsip_auth_clt_sess auth_sess
         pjsip_cid_hdr *call_id
