@@ -1629,7 +1629,7 @@ del ReplacesHeader_new
 def FrozenReplacesHeader_new(cls, BaseReplacesHeader header):
     if isinstance(header, cls):
         return header
-    return cls(header.call_id, header.header.from_tag, header.to_tag, header.early_only, frozendict(header.parameters))
+    return cls(header.call_id, header.from_tag, header.to_tag, header.early_only, frozendict(header.parameters))
 
 cdef class FrozenReplacesHeader(BaseReplacesHeader):
     def __init__(self, str call_id not None, str from_tag not None, str to_tag not None, int early_only=0, frozendict parameters not None=frozendict()):
