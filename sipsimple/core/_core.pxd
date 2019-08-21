@@ -1730,6 +1730,9 @@ cdef class FrozenSubjectHeader(BaseSubjectHeader):
 cdef class BaseReplacesHeader(object):
     pass
 
+cdef class BaseGatewayIdHeader(object):
+    pass
+
 cdef class ReplacesHeader(BaseReplacesHeader):
     # attributes
     cdef public str call_id
@@ -1738,7 +1741,24 @@ cdef class ReplacesHeader(BaseReplacesHeader):
     cdef public int early_only
     cdef dict _parameters
 
+cdef class GatewayIdHeader(BaseGatewayIdHeader):
+    # attributes
+    cdef public str call_id
+    cdef public str from_tag
+    cdef public str to_tag
+    cdef public int early_only
+    cdef dict _parameters
+
 cdef class FrozenReplacesHeader(BaseReplacesHeader):
+    # attributes
+    cdef int initialized
+    cdef readonly str call_id
+    cdef readonly str from_tag
+    cdef readonly str to_tag
+    cdef readonly int early_only
+    cdef readonly frozendict parameters
+
+cdef class FrozenGatewayIdHeader(BaseGatewayIdHeader):
     # attributes
     cdef int initialized
     cdef readonly str call_id
