@@ -638,6 +638,7 @@ retry_on_deadlock:
 
     // Move in-dialog INFO request out of dialog
     if (pjsip_method_cmp(&rdata->msg_info.msg->line.req.method, &pjsip_info_method)==0) {
+	pj_mutex_unlock(mod_ua.mutex);
         return PJ_FALSE;
     }
 
