@@ -3,7 +3,7 @@
 import glob
 import os
 
-from distutils.core import setup
+from setuptools import setup
 from distutils.extension import Extension
 from setup_pjsip import PJSIP_build_ext
 
