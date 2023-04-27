@@ -103,7 +103,7 @@ class RPIDNote(XMLLocalizedStringElement):
     def from_string(cls, value):
         if isinstance(value, Note):
             return cls(value, value.lang)
-        elif isinstance(value, str):
+        elif isinstance(value, basestring):
             return cls(value)
         else:
             raise ValueError("expected str/unicode instance, got %s instead" % value.__class__.__name__)
@@ -121,7 +121,7 @@ class RPIDOther(XMLLocalizedStringElement):
     def from_string(cls, value):
         if isinstance(value, Other):
             return cls(value, value.lang)
-        elif isinstance(value, str):
+        elif isinstance(value, basestring):
             return cls(value)
         else:
             raise ValueError("expected str/unicode instance, got %s instead" % value.__class__.__name__)
@@ -130,7 +130,9 @@ class RPIDOther(XMLLocalizedStringElement):
 class Other(Note): pass
 
 
-class ActivityRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class ActivityRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -186,13 +188,13 @@ class Activities(XMLStringListElement, PersonExtension):
         self.notes._build_element()
 
     def add(self, activity):
-        if isinstance(activity, str):
+        if isinstance(activity, basestring):
             if activity in self._xml_item_registry.names:
                 activity = self._xml_item_registry.class_map[activity]()
             else:
                 activity = self._xml_item_other_type.from_string(activity)
         unknown_activity = self._xml_item_registry.class_map['unknown']()
-        if activity == unknown_activity or unknown_activity in iter(list(self._element_map.values())):
+        if activity == unknown_activity or unknown_activity in self._element_map.itervalues():
             self.clear()
         super(Activities, self).add(activity)
 
@@ -204,7 +206,9 @@ class Activities(XMLStringListElement, PersonExtension):
 Person.register_extension('activities', type=Activities)
 
 
-class MoodRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class MoodRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -267,13 +271,13 @@ class Mood(XMLStringListElement, PersonExtension):
         self.notes._build_element()
 
     def add(self, mood):
-        if isinstance(mood, str):
+        if isinstance(mood, basestring):
             if mood in self._xml_item_registry.names:
                 mood = self._xml_item_registry.class_map[mood]()
             else:
                 mood = self._xml_item_other_type.from_string(mood)
         unknown_mood = self._xml_item_registry.class_map['unknown']()
-        if mood == unknown_mood or unknown_mood in iter(list(self._element_map.values())):
+        if mood == unknown_mood or unknown_mood in self._element_map.itervalues():
             self.clear()
         super(Mood, self).add(mood)
 
@@ -447,7 +451,9 @@ class PrivacyType(XMLElementType):
         child_attributes = (getattr(cls, name) for name in dir(cls) if type(getattr(cls, name)) is XMLElementChild)
         cls._privacy_attributes = tuple(attr.name for attr in child_attributes if attr.name in ('audio', 'text', 'video') or issubclass(attr.type, PrivacyElement))
 
-class Privacy(XMLElement, PersonExtension, metaclass=PrivacyType):
+class Privacy(XMLElement, PersonExtension):
+    __metaclass__ = PrivacyType
+
     _xml_tag = 'privacy'
     _xml_namespace = namespace
     _xml_document = PIDFDocument
@@ -506,7 +512,9 @@ class Privacy(XMLElement, PersonExtension, metaclass=PrivacyType):
 Person.register_extension('privacy', type=Privacy)
 
 
-class RelationshipRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class RelationshipRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -550,7 +558,9 @@ class Relationship(XMLElement, ServiceExtension):
 Service.register_extension('relationship', type=Relationship)
 
 
-class ServiceClassRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class ServiceClassRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -593,7 +603,9 @@ class ServiceClass(XMLElement, ServiceExtension):
 Service.register_extension('service_class', type=ServiceClass)
 
 
-class SphereRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class SphereRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -654,7 +666,7 @@ class TimeOffset(XMLStringElement, PersonExtension):
 
     def __init__(self, value=None, id=None, since=None, until=None, description=None):
         if value is None:
-            value = int(DateTime.now().utcoffset().seconds / 60)
+            value = DateTime.now().utcoffset().seconds / 60
         XMLStringElement.__init__(self, str(value))
         self.id = id
         self.since = since

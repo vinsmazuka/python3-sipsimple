@@ -1,140 +1,166 @@
 
-Installation procedure for SIP SIMPLE SDK on MacOSX
----------------------------------------------------
+Installation procedure for SIP SIMPLE client SDK on MacOSX >= 10.11
+-------------------------------------------------------------------
 
 Home page: http://sipsimpleclient.org
 
-This document describes the installation procedure on MacOSX >= 10.14
+This document describes the installation procedure on MacOSX >= 10.11
 
 The installation procedure consists of the steps described below:
 
 Step 1. Prerequisites
-Step 2. Install dependencies
-Step 3. Install SIP SIMPLE SDK
+Step 2. Install Dependencies
+Step 3. Install SIP SIMPLE client SDK
 
 
 Step 1. Prerequisites
 ---------------------
 
- * MacOSX >= 10.14
- * Apple Developer tools (XCode 11)
- * MacPorts from https://guide.macports.org
+ * MacOSX >= 10.12
+ * Apple Developer tools (XCode 9)
+ * Homebrew from http://brew.sh
+ * darcs version control tool
+ * Python pip installer
+ * Python virtualenv and virtualenvwrapper modules
 
 
-Step 2. Install dependencies
+
+Step 2. Install Dependencies
 ----------------------------
 
 See Dependencies.txt for detailed description of the required libraries and
 their minimum version number.
 
-A. Install the C dependencies
+A. Install the C dependencies, the software will be installed
+under /usr/local folder by default with Homebrew:
 
-Install some building tools:
+brew install darcs gnutls yasm pkg-config x264 libvpx mpfr libmpc
 
-sudo port install darcs pkg-config yasm 
+NOTE: Install ffmpeg without SecureTransport support (or you app will be rejected
+      from the Mac App Store:
 
-Install the dynamic libraries required by sipsimple:
+brew install -s ffmpeg --without-securetransport
 
-sudo port install x264 gnutls openssl sqlite3 gnutls ffmpeg mpfr libmpc libvpx
+B.  Build and install the Python dependencies
 
-If building for the Mac Store or a notarized version a lot more attention is
-required to build all dependencies.  All dynamic libraries must:
+The procedure below relies on the standard Python interpreter 2.7 that comes
+with MacOSX and Xcode version 9.  A 64bit build will be produced.
 
-  1. be signed with an Apple developer account
-  2. contain LC_VERSION_MIN_MACOSX option
-  3. not load non-system libraries from outside the sandbox
+This guide assumes all software is being installed in a virtualenv (except for
+the packages installed with Homebrew, of course). 
 
-For solving 2) all port packages and their depedencies must be re-compiled from
-sources. First locate all the dependencies of each package:
+Install pip:
 
-  otool -L /opt/local/lib/XYZ.dylib
+sudo easy_install pip
 
-For each found dependency, remove the binary package and reinstall the port
-from source:
+Install virtualenv and virtualenvwrapper:
 
-   sudo port uninstall package
-   sudo port -s install package
+sudo -H pip install virtualenv --upgrade --ignore-installed six
+sudo -H pip install virtualenvwrapper --upgrade --ignore-installed six
 
-Check if the library contains LC_VERSION_MIN_MACOSX flag, for example:
-   
-otool -l /opt/local/lib/libgnutls.dylib |grep -B1 -A3 LC_VERSION_MIN_MACOSX
-Load command 8
-      cmd LC_VERSION_MIN_MACOSX
-  cmdsize 16
-  version 10.11
-      sdk 10.14
+The above are installed in /Library/Python/2.7/site-packages
 
-For solving 3) use install_name_tool as follows:
+Add to ~/.bashrc:
 
-old_path="/opt/local/lib/\|/usr/local/opt/libmpc/lib/"  # <-- add all native lib paths
-new_path="@executable_path/../Frameworks/" # <- replace with relative path inside sandbox
+export WORKON_HOME=$HOME/.virtualenvs
+export PIP_VIRTUALENV_BASE=$WORKON_HOME
+export PIP_RESPECT_VIRTUALENV=true
+[[ -f /usr/share/virtualenvwrapper/virtualenvwrapper_lazy.sh ]] && source /usr/share/virtualenvwrapper/virtualenvwrapper_lazy.sh
+[[ -f /usr/local/bin/virtualenvwrapper_lazy.sh ]] && source /usr/local/bin/virtualenvwrapper_lazy.sh
 
-for library in $@; do
-  new_basename=$(basename $library)
-  echo $new_basename
-  install_name_tool -id $new_path$new_basename $library
-  dependencies=$(otool -L $library | grep $old_path | awk '{print $1}')
-  for dependency in $dependencies; do
-      new_basename=$(basename $dependency)
-      new_name="$new_path$new_basename"
-      install_name_tool -change $dependency $new_name $library
-  done
-done
+Creating a virtual environment for python-simple
 
-For example:
+mkvirtualenv -p $(which python2.7) sipsimple
 
-otool -L /opt/local/lib/libgnutls.dylib
-	/opt/local/lib/libgnutls.30.dylib (compatibility version 59.0.0, current version 59.1.0)
-	/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 58286.255.3)
-	/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 1575.17.0)
-	/opt/local/lib/libp11-kit.0.dylib (compatibility version 4.0.0, current version 4.0.0)
-	/opt/local/lib/libidn2.0.dylib (compatibility version 4.0.0, current version 4.7.0)
-	/opt/local/lib/libunistring.2.dylib (compatibility version 4.0.0, current version 4.0.0)
-	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1252.250.1)
-	/opt/local/lib/libtasn1.6.dylib (compatibility version 13.0.0, current version 13.0.0)
-	/opt/local/lib/libnettle.8.dylib (compatibility version 8.0.0, current version 8.1.0)
-	/opt/local/lib/libhogweed.6.dylib (compatibility version 6.0.0, current version 6.1.0)
-	/opt/local/lib/libgmp.10.dylib (compatibility version 15.0.0, current version 15.1.0)
-	/opt/local/lib/libintl.8.dylib (compatibility version 10.0.0, current version 10.5.0)
+You'll be dropped right into it. If you want to exit it:
+
+deactivate
+
+And to activate the virtualenv again:
+
+workon sipsimple
+
+Install python dependencies:
+
+pip install -U python-gnutls python-otr dnspython twisted \
+python-application cython python-dateutil greenlet lxml
+
+All packages are installed in:
+
+~/.virtualenvs/sipsimple/lib/python2.7/site-packages/
 
 
-after running install_name_tool becomes:
+Step 3. Build and install SIP SIMPLE client SDK
+-----------------------------------------------
 
-otool -L Frameworks/libgnutls.30.dylib 
-	@executable_path/../Frameworks/libgnutls.30.dylib (compatibility version 59.0.0, current version 59.1.0)
-	/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 58286.255.3)
-	/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 1575.17.0)
-	@executable_path/../Frameworks/libp11-kit.0.dylib (compatibility version 4.0.0, current version 4.0.0)
-	@executable_path/../Frameworks/libidn2.0.dylib (compatibility version 4.0.0, current version 4.7.0)
-	@executable_path/../Frameworks/libunistring.2.dylib (compatibility version 4.0.0, current version 4.0.0)
-	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1252.250.1)
-	@executable_path/../Frameworks/libtasn1.6.dylib (compatibility version 13.0.0, current version 13.0.0)
-	@executable_path/../Frameworks/libnettle.8.dylib (compatibility version 8.0.0, current version 8.1.0)
-	@executable_path/../Frameworks/libhogweed.6.dylib (compatibility version 6.0.0, current version 6.1.0)
-	@executable_path/../Frameworks/libgmp.10.dylib (compatibility version 15.0.0, current version 15.1.0)
-	@executable_path/../Frameworks/libintl.8.dylib (compatibility version 10.0.0, current version 10.5.0)
+Enter virtual environment:
 
+workon sipsimple
 
-Building libvpx library
------------------------
+The SDK consists of four parts:
 
-To obtain LC_VERSION_MIN_MACOSX for libvpx.dylib:
+ 1. python-eventlib
+ 2. XCAP library
+ 3. MSRP library
+ 4. SIP SIMPLE library
 
-Download the sources of libvpx from github. Run configure, then edit libs.mk and change the
-line:
+# Eventlet
+if [ -d python-eventlib ]; then
+        cd python-eventlib
+        darcs pull -a
+else
+        darcs get http://devel.ag-projects.com/repositories/python-eventlib
+        cd python-eventlib
+fi
+pip install .
+cd ..
 
-$(BUILD_PFX)$(LIBVPX_SO): extralibs += -lm
+# XCAP library
+if [ -d python-xcaplib ]; then
+        cd python-xcaplib
+        darcs pull -a
+else
+        darcs get http://devel.ag-projects.com/repositories/python-xcaplib
+        cd python-xcaplib
+fi
+pip install .
+cd ..
 
-to:
+# MSRP library
+if [ -d python-msrplib ]; then
+        cd python-msrplib
+        darcs pull -a
+else
+        darcs get http://devel.ag-projects.com/repositories/python-msrplib
+        cd python-msrplib
+fi
+pip install .
+cd ..
 
-$(BUILD_PFX)$(LIBVPX_SO): extralibs += -lm -mmacosx-version-min=10.11
+# SIP SIMPLE library
+if [ -d python-sipsimple ]; then
+    cd python-sipsimple
+    darcs pull -a
+else
+    darcs get --set-scripts-executable http://devel.ag-projects.com/repositories/python-sipsimple
+    cd python-sipsimple
+fi
 
+Build and install SIP SIMPLE library:
 
+python setup.py build_ext --pjsip-clean-compile
+python setup.py install
 
-Step 3. Install SIP SIMPLE SDK 
-------------------------------
+Additional, you can install the command line interface scripts that can be
+used to test the SDK capabilities.
 
-See Install.linux document
+if [ -d sipclients ]; then
+    cd sipclients
+    darcs pull -a
+else
+    darcs get --set-scripts-executable http://devel.ag-projects.com/repositories/sipclients
+    cd sipclients
+fi
+python setup.py install
+cd ..
 
-Same steps related to C dependencies must be taken for .so dynamic libraries
-that are part of Python packages on which the SDK depends.

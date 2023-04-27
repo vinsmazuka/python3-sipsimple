@@ -6,12 +6,12 @@ hop(s) and failover for routing of SIP messages and reservation of network
 resources prior the starting of a SIP session.
 """
 
-
+from __future__ import absolute_import
 
 import re
 from itertools import chain
 from time import time
-from urllib.parse import urlparse
+from urlparse import urlparse
 
 # patch dns.entropy module which is not thread-safe
 import dns
@@ -39,10 +39,7 @@ import dns.query
 dns.resolver.socket = socket
 dns.query.socket = socket
 dns.query.select = select
-
-#TODO3: dnspython newer than 0.20 has a new API
-if ('_set_polling_backend' in dir(dns.query)):
-    dns.query._set_polling_backend(dns.query._select_for)
+dns.query._set_polling_backend(dns.query._select_for)
 
 from application.notification import IObserver, NotificationCenter, NotificationData
 from application.python import Null, limit
@@ -50,7 +47,7 @@ from application.python.decorator import decorator, preserve_signature
 from application.python.types import Singleton
 from dns import exception, rdatatype
 from twisted.internet import reactor
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core import Route
 from sipsimple.threading import run_in_twisted_thread
@@ -73,7 +70,7 @@ def post_dns_lookup_notifications(func):
         notification_center = NotificationCenter()
         try:
             result = func(obj, *args, **kwargs)
-        except DNSLookupError as e:
+        except DNSLookupError, e:
             notification_center.post_notification('DNSLookupDidFail', sender=obj, data=NotificationData(error=str(e)))
             raise
         else:
@@ -199,31 +196,31 @@ class DNSLookup(object):
 
         try:
             # If the host part of the URI is an IP address, we will not do any lookup
-            if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", uri.host.decode()):
-                return [(uri.host.decode(), uri.port or service_port)]
+            if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", uri.host):
+                return [(uri.host, uri.port or service_port)]
 
             resolver = DNSResolver()
             resolver.cache = self.cache
             resolver.timeout = timeout
             resolver.lifetime = lifetime
 
-            record_name = '%s.%s' % (service_prefix, uri.host.decode())
+            record_name = '%s.%s' % (service_prefix, uri.host)
             services = self._lookup_srv_records(resolver, [record_name], log_context=log_context)
             if services[record_name]:
                 return [(result.address, result.port) for result in services[record_name]]
             elif service_fallback:
-                addresses = self._lookup_a_records(resolver, [uri.host.decode()], log_context=log_context)
-                if addresses[uri.host.decode()]:
-                    return [(addr, service_port) for addr in addresses[uri.host.decode()]]
+                addresses = self._lookup_a_records(resolver, [uri.host], log_context=log_context)
+                if addresses[uri.host]:
+                    return [(addr, service_port) for addr in addresses[uri.host]]
         except dns.resolver.Timeout:
-            raise DNSLookupError('Timeout in lookup for %s servers for domain %s' % (service, uri.host.decode()))
+            raise DNSLookupError('Timeout in lookup for %s servers for domain %s' % (service, uri.host))
         else:
-            raise DNSLookupError('No %s servers found for domain %s' % (service, uri.host.decode()))
+            raise DNSLookupError('No %s servers found for domain %s' % (service, uri.host))
 
 
     @run_in_waitable_green_thread
     @post_dns_lookup_notifications
-    def lookup_sip_proxy(self, uri, supported_transports, timeout=10.0, lifetime=30.0, tls_name=None):
+    def lookup_sip_proxy(self, uri, supported_transports, timeout=3.0, lifetime=15.0):
         """
         Performs an RFC 3263 compliant lookup of transport/ip/port combinations
         for a particular SIP URI. As arguments it takes a SIPURI object
@@ -234,14 +231,11 @@ class DNSLookup(object):
         The DNSLookupDidSucceed notification contains a result attribute which
         is a list of Route objects. The DNSLookupDidFail notification contains
         an error attribute describing the error encountered.
-        
-        Set tls_name to the Common Name the server must present
         """
 
         naptr_service_transport_map = {"sips+d2t": "tls",
                                        "sip+d2t": "tcp",
                                        "sip+d2u": "udp"}
-
         transport_service_map = {"udp": "_sip._udp",
                                  "tcp": "_sip._tcp",
                                  "tls": "_sips._tcp"}
@@ -257,14 +251,12 @@ class DNSLookup(object):
 
         try:
             # If the host part of the URI is an IP address, we will not do any lookup
-            transport = uri.transport.decode() if isinstance(uri.transport, bytes) else uri.transport
-            if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", uri.host.decode()):
-                transport = 'tls' if uri.secure else transport.lower()
+            if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", uri.host):
+                transport = 'tls' if uri.secure else uri.transport.lower()
                 if transport not in supported_transports:
-                    raise DNSLookupError("IP transport %s dictated by URI is not supported" % transport)
+                    raise DNSLookupError("Transport %s dictated by URI is not supported" % transport)
                 port = uri.port or (5061 if transport=='tls' else 5060)
-                route = [Route(address=uri.host, port=port, transport=transport, tls_name=tls_name or uri.host)]
-                return route
+                return [Route(address=uri.host, port=port, transport=transport)]
 
             resolver = DNSResolver()
             resolver.cache = self.cache
@@ -273,12 +265,12 @@ class DNSLookup(object):
 
             # If the port is specified in the URI, we will only do an A lookup
             if uri.port:
-                transport = 'tls' if uri.secure else transport.lower()
+                transport = 'tls' if uri.secure else uri.transport.lower()
                 if transport not in supported_transports:
-                    raise DNSLookupError("Host transport %s dictated by URI is not supported" % transport)
-                addresses = self._lookup_a_records(resolver, [uri.host.decode()], log_context=log_context)
-                if addresses[uri.host.decode()]:
-                    return [Route(address=addr, port=uri.port, transport=transport, tls_name=tls_name or uri.host) for addr in addresses[uri.host.decode()]]
+                    raise DNSLookupError("Transport %s dictated by URI is not supported" % transport)
+                addresses = self._lookup_a_records(resolver, [uri.host], log_context=log_context)
+                if addresses[uri.host]:
+                    return [Route(address=addr, port=uri.port, transport=transport) for addr in addresses[uri.host]]
 
             # If the transport was already set as a parameter on the SIP URI, only do SRV lookups
             elif 'transport' in uri.parameters:
@@ -287,16 +279,16 @@ class DNSLookup(object):
                     raise DNSLookupError("Requested lookup for URI with %s transport, but it is not supported" % transport)
                 if uri.secure and transport != 'tls':
                     raise DNSLookupError("Requested lookup for SIPS URI, but with %s transport parameter" % transport)
-                record_name = '%s.%s' % (transport_service_map[transport], uri.host.decode())
+                record_name = '%s.%s' % (transport_service_map[transport], uri.host)
                 services = self._lookup_srv_records(resolver, [record_name], log_context=log_context)
                 if services[record_name]:
-                    return [Route(address=result.address, port=result.port, transport=transport, tls_name=tls_name or uri.host) for result in services[record_name]]
+                    return [Route(address=result.address, port=result.port, transport=transport) for result in services[record_name]]
                 else:
                     # If SRV lookup fails, try A lookup
-                    addresses = self._lookup_a_records(resolver, [uri.host.decode()], log_context=log_context)
+                    addresses = self._lookup_a_records(resolver, [uri.host], log_context=log_context)
                     port = 5061 if transport=='tls' else 5060
-                    if addresses[uri.host.decode()]:
-                        return [Route(address=addr, port=port, transport=transport, tls_name=tls_name or uri.host) for addr in addresses[uri.host.decode()]]
+                    if addresses[uri.host]:
+                        return [Route(address=addr, port=port, transport=transport) for addr in addresses[uri.host]]
 
             # Otherwise, it means we don't have a numeric IP address, a port isn't specified and neither is a transport. So we have to do a full NAPTR lookup
             else:
@@ -306,34 +298,34 @@ class DNSLookup(object):
                         raise DNSLookupError("Requested lookup for SIPS URI, but TLS transport is not supported")
                     supported_transports = ['tls']
                 # First try NAPTR lookup
-                naptr_services = [service for service, transport in list(naptr_service_transport_map.items()) if transport in supported_transports]
+                naptr_services = [service for service, transport in naptr_service_transport_map.iteritems() if transport in supported_transports]
                 try:
-                    pointers = self._lookup_naptr_record(resolver, uri.host.decode(), naptr_services, log_context=log_context)
+                    pointers = self._lookup_naptr_record(resolver, uri.host, naptr_services, log_context=log_context)
                 except dns.resolver.Timeout:
                     pointers = []
                 if pointers:
-                    return [Route(address=result.address, port=result.port, transport=naptr_service_transport_map[result.service], tls_name=tls_name or uri.host) for result in pointers]
+                    return [Route(address=result.address, port=result.port, transport=naptr_service_transport_map[result.service]) for result in pointers]
                 else:
                     # If that fails, try SRV lookup
                     routes = []
                     for transport in supported_transports:
-                        record_name = '%s.%s' % (transport_service_map[transport], uri.host.decode())
+                        record_name = '%s.%s' % (transport_service_map[transport], uri.host)
                         try:
                             services = self._lookup_srv_records(resolver, [record_name], log_context=log_context)
                         except dns.resolver.Timeout:
                             continue
                         if services[record_name]:
-                            routes.extend(Route(address=result.address, port=result.port, transport=transport, tls_name=tls_name or uri.host) for result in services[record_name])
+                            routes.extend(Route(address=result.address, port=result.port, transport=transport) for result in services[record_name])
                     if routes:
                         return routes
                     else:
                         # If SRV lookup fails, try A lookup
                         transport = 'tls' if uri.secure else 'udp'
                         if transport in supported_transports:
-                            addresses = self._lookup_a_records(resolver, [uri.host.decode()], log_context=log_context)
+                            addresses = self._lookup_a_records(resolver, [uri.host], log_context=log_context)
                             port = 5061 if transport=='tls' else 5060
-                            if addresses[uri.host.decode()]:
-                                return [Route(address=addr, port=port, transport=transport, tls_name=tls_name or uri.host) for addr in addresses[uri.host.decode()]]
+                            if addresses[uri.host]:
+                                return [Route(address=addr, port=port, transport=transport) for addr in addresses[uri.host]]
         except dns.resolver.Timeout:
             raise DNSLookupError("Timeout in lookup for routes for SIP URI %s" % uri)
         else:
@@ -351,7 +343,7 @@ class DNSLookup(object):
 
         try:
             # If the host part of the URI is an IP address, we cannot not do any lookup
-            if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", uri.host.decode()):
+            if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", uri.host):
                 raise DNSLookupError("Cannot perform DNS query because the host is an IP address")
 
             resolver = DNSResolver()
@@ -359,26 +351,26 @@ class DNSLookup(object):
             resolver.timeout = timeout
             resolver.lifetime = lifetime
 
-            record_name = 'xcap.%s' % uri.host.decode()
+            record_name = 'xcap.%s' % uri.host
             results = []
             try:
                 answer = resolver.query(record_name, rdatatype.TXT)
-            except dns.resolver.Timeout as e:
+            except dns.resolver.Timeout, e:
                 notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='TXT', query_name=str(record_name), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
                 raise
-            except exception.DNSException as e:
+            except exception.DNSException, e:
                 notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='TXT', query_name=str(record_name), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
             else:
                 notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='TXT', query_name=str(record_name), nameservers=resolver.nameservers, answer=answer, error=None, **log_context))
                 for result_uri in list(chain(*(r.strings for r in answer.rrset))):
-                    parsed_uri = urlparse(result_uri.decode())
+                    parsed_uri = urlparse(result_uri)
                     if parsed_uri.scheme in ('http', 'https') and parsed_uri.netloc:
-                        results.append(result_uri.decode())
+                        results.append(result_uri)
             if not results:
-                raise DNSLookupError('No XCAP servers found for domain %s' % uri.host.decode())
+                raise DNSLookupError('No XCAP servers found for domain %s' % uri.host)
             return results
         except dns.resolver.Timeout:
-            raise DNSLookupError('Timeout in lookup for XCAP servers for domain %s' % uri.host.decode())
+            raise DNSLookupError('Timeout in lookup for XCAP servers for domain %s' % uri.host)
 
 
     def _lookup_a_records(self, resolver, hostnames, additional_records=[], log_context={}):
@@ -391,10 +383,10 @@ class DNSLookup(object):
             else:
                 try:
                     answer = resolver.query(hostname, rdatatype.A)
-                except dns.resolver.Timeout as e:
+                except dns.resolver.Timeout, e:
                     notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='A', query_name=str(hostname), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
                     raise
-                except exception.DNSException as e:
+                except exception.DNSException, e:
                     notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='A', query_name=str(hostname), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
                     addresses[hostname] = []
                 else:
@@ -416,10 +408,10 @@ class DNSLookup(object):
             else:
                 try:
                     answer = resolver.query(srv_name, rdatatype.SRV)
-                except dns.resolver.Timeout as e:
+                except dns.resolver.Timeout, e:
                     notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='SRV', query_name=str(srv_name), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
                     raise
-                except exception.DNSException as e:
+                except exception.DNSException, e:
                     notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='SRV', query_name=str(srv_name), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
                 else:
                     notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='SRV', query_name=str(srv_name), nameservers=resolver.nameservers, answer=answer, error=None, **log_context))
@@ -435,36 +427,32 @@ class DNSLookup(object):
         pointers = []
         try:
             answer = resolver.query(domain, rdatatype.NAPTR)
-        except dns.resolver.Timeout as e:
+        except dns.resolver.Timeout, e:
             notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='NAPTR', query_name=str(domain), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
             raise
-        except exception.DNSException as e:
+        except exception.DNSException, e:
             notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='NAPTR', query_name=str(domain), nameservers=resolver.nameservers, answer=None, error=e, **log_context))
         else:
             notification_center.post_notification('DNSLookupTrace', sender=self, data=NotificationData(query_type='NAPTR', query_name=str(domain), nameservers=resolver.nameservers, answer=answer, error=None, **log_context))
-            records = [r for r in answer.rrset if r.service.decode().lower() in services]
+            records = [r for r in answer.rrset if r.service.lower() in services]
             services = self._lookup_srv_records(resolver, [r.replacement.to_text() for r in records], answer.response.additional, log_context)
-
             for record in records:
-                pointers.extend(NAPTRResult(record.service.decode().lower(), record.order, record.preference, r.priority, r.weight, r.port, r.address) for r in services.get(record.replacement.to_text(), ()))
-
+                pointers.extend(NAPTRResult(record.service.lower(), record.order, record.preference, r.priority, r.weight, r.port, r.address) for r in services.get(record.replacement.to_text(), ()))
         pointers.sort(key=lambda result: (result.order, result.preference))
         return pointers
 
 
-@implementer(IObserver)
-class DNSManager(object, metaclass=Singleton):
+class DNSManager(object):
+    __metaclass__ = Singleton
+
+    implements(IObserver)
 
     def __init__(self):
-        try:
-            default_resolver = InternalResolver()
-        except dns.resolver.NoResolverConfiguration:
-            default_resolver = Null
-            
+        default_resolver = InternalResolver()
         self.search = default_resolver.search
         self.domain = default_resolver.domain
+        self.nameservers = default_resolver.nameservers
         self.google_nameservers = ['8.8.8.8', '8.8.4.4']
-        self.nameservers = default_resolver.nameservers or []
         self.probed_domain = 'sip2sip.info.'
         self._channel = coros.queue()
         self._proc = None
@@ -515,13 +503,7 @@ class DNSManager(object, metaclass=Singleton):
         if self._timer is not None and self._timer.active():
             self._timer.cancel()
         self._timer = None
-
-        try:
-            resolver = InternalResolver()
-        except dns.resolver.NoResolverConfiguration as e:
-            self._timer = reactor.callLater(15, self._channel.send, Command('probe_dns'))
-            return
-        
+        resolver = InternalResolver()
         self.domain = resolver.domain
         self.search = resolver.search
         local_nameservers = resolver.nameservers

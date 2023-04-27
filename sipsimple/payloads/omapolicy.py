@@ -55,20 +55,20 @@ class ExternalList(XMLListElement, ConditionElement):
         self.update(entries)
 
     def __iter__(self):
-        return (str(item) for item in super(ExternalList, self).__iter__())
+        return (unicode(item) for item in super(ExternalList, self).__iter__())
 
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, list(self))
 
     def add(self, item):
-        if isinstance(item, str):
+        if isinstance(item, basestring):
             item = Entry(item)
         super(ExternalList, self).add(item)
 
     def remove(self, item):
-        if isinstance(item, str):
+        if isinstance(item, basestring):
             try:
-                item = next((entry for entry in super(ExternalList, self).__iter__() if entry == item))
+                item = (entry for entry in super(ExternalList, self).__iter__() if entry == item).next()
             except StopIteration:
                 raise KeyError(item)
         super(ExternalList, self).remove(item)

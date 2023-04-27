@@ -128,15 +128,15 @@ cdef class Invitation:
                 return 0
 
             self.direction = "incoming"
-            self.transport = rdata.tp_info.transport.type_name.decode().lower()
+            self.transport = rdata.tp_info.transport.type_name.lower()
             self.request_uri = FrozenSIPURI_create(<pjsip_sip_uri *> pjsip_uri_get_uri(rdata.msg_info.msg.line.req.uri))
-            if _is_valid_ip(pj_AF_INET(), self.request_uri.host.encode()):
+            if _is_valid_ip(pj_AF_INET(), self.request_uri.host):
                 self.local_contact_header = FrozenContactHeader(self.request_uri)
             else:
                 self.local_contact_header = FrozenContactHeader(FrozenSIPURI(host=_pj_str_to_str(rdata.tp_info.transport.local_name.host),
                                                                              user=self.request_uri.user, port=rdata.tp_info.transport.local_name.port,
                                                                              parameters=(frozendict(transport=self.transport) if self.transport != "udp" else frozendict())))
-            contact_str = PJSTR(str(self.local_contact_header.body).encode())
+            contact_str = PJSTR(str(self.local_contact_header.body))
             tp_sel.type = PJSIP_TPSELECTOR_TRANSPORT
             tp_sel.u.transport = rdata.tp_info.transport
 
@@ -343,33 +343,31 @@ cdef class Invitation:
         try:
             route_set = <pjsip_route_hdr *> &self._route_set
 
-            if self.state is not None:
+            if self.state != None:
                 raise SIPCoreInvalidStateError('Can only transition to the "outgoing" state from the "None" state, currently in the "%s" state' % self.state)
             if timeout is not None and timeout <= 0:
                 raise ValueError("Timeout value must be positive")
 
-            self.transport = route_header.uri.transport.decode()
+            self.transport = route_header.uri.transport
             self.direction = "outgoing"
             self.credentials = FrozenCredentials.new(credentials) if credentials is not None else None
+            self.request_uri = FrozenSIPURI.new(request_uri)
+            self.route_header = FrozenRouteHeader.new(route_header)
+            self.route_header.uri.parameters.dict["lr"] = None # always send lr parameter in Route header
+            self.route_header.uri.parameters.dict["hide"] = None # always hide Route header
             self.local_contact_header = FrozenContactHeader.new(contact_header)
             self.sdp.proposed_local = FrozenSDPSession.new(sdp) if sdp is not None else None
 
             from_header_parameters = from_header.parameters.copy()
             from_header_parameters.pop("tag", None)
             from_header.parameters = {}
-            from_header_str = PJSTR(from_header.body.encode())
+            from_header_str = PJSTR(from_header.body)
             to_header_parameters = to_header.parameters.copy()
             to_header_parameters.pop("tag", None)
             to_header.parameters = {}
-            to_header_str = PJSTR(to_header.body.encode())
-            contact_str = PJSTR(str(self.local_contact_header.body).encode())
-            self.request_uri = FrozenSIPURI.new(request_uri)
-            struri = str(request_uri)
-            request_uri_str = PJSTR(struri.encode())
-
-            self.route_header = FrozenRouteHeader.new(route_header)
-            self.route_header.uri.parameters.dict["lr"] = None # always send lr parameter in Route header
-            self.route_header.uri.parameters.dict["hide"] = None # always hide Route header
+            to_header_str = PJSTR(to_header.body)
+            contact_str = PJSTR(str(self.local_contact_header.body))
+            request_uri_str = PJSTR(str(request_uri))
 
             with nogil:
                 status = pjsip_dlg_create_uac(pjsip_ua_instance(), &from_header_str.pj_str, &contact_str.pj_str,
@@ -646,7 +644,7 @@ cdef class Invitation:
             _add_headers_to_tdata(tdata, [refer_to_header, Header('Referred-By', str(self.local_identity.uri))])
             _add_headers_to_tdata(tdata, extra_headers)
             # We can't remove the Event header or PJSIP will fail to match responses to this request
-            _remove_headers_from_tdata(tdata, [b"Expires"])
+            _remove_headers_from_tdata(tdata, ["Expires"])
             with nogil:
                 status = pjsip_evsub_send_request(self._transfer_usage, tdata)
             if status != 0:
@@ -843,8 +841,8 @@ cdef class Invitation:
 
         contact_str = str(contact_header.uri)
         if contact_header.display_name:
-            contact_str = "%s <%s>" % (contact_header.display_name, contact_str)
-        pj_strdup2_with_null(self._dialog.pool, &contact_str_pj, contact_str.encode())
+            contact_str = "%s <%s>" % (contact_header.display_name.encode('utf-8'), contact_str)
+        pj_strdup2_with_null(self._dialog.pool, &contact_str_pj, contact_str)
         contact = pjsip_parse_uri(self._dialog.pool, contact_str_pj.ptr, contact_str_pj.slen, PJSIP_PARSE_URI_AS_NAMEADDR)
         if contact == NULL:
             raise SIPCoreError("Not a valid Contact header: %s" % contact_str)
@@ -1159,7 +1157,7 @@ cdef class Invitation:
         self._send_notify()
         with nogil:
             pjsip_evsub_terminate(self._transfer_usage, 0)
-        match = sipfrag_re.match(self._sipfrag_payload.str.decode())
+        match = sipfrag_re.match(self._sipfrag_payload.str)
         code = int(match.group('code'))
         reason = match.group('reason')
         state_timer = TransferStateCallbackTimer("TERMINATED", code, reason)
@@ -1180,17 +1178,17 @@ cdef class Invitation:
             except IndexError:
                 status = "Unknown"
         content = "SIP/2.0 %d %s\r\n" % (code, status)
-        self._sipfrag_payload = PJSTR(content.encode())
+        self._sipfrag_payload = PJSTR(content)
 
     cdef int _send_notify(self) except -1:
         cdef pjsip_evsub_state state
         cdef pj_str_t *reason_p = NULL
         cdef pjsip_tx_data *tdata
         cdef int status
-        #cdef dict _sipfrag_version = dict(version=b"2.0")
-        cdef PJSTR _content_type = PJSTR(b"message")
-        cdef PJSTR _content_subtype = PJSTR(b"sipfrag;version=2.0")
-        cdef PJSTR noresource = PJSTR(b"noresource")
+        cdef dict _sipfrag_version = dict(version="2.0")
+        cdef PJSTR _content_type = PJSTR("message")
+        cdef PJSTR _content_subtype = PJSTR("sipfrag")
+        cdef PJSTR noresource = PJSTR("noresource")
         cdef PJSTR content
 
         if self.transfer_state == "ACTIVE":
@@ -1204,8 +1202,7 @@ cdef class Invitation:
             raise PJSIPError("Could not create NOTIFY request", status)
         if self.transfer_state in ("ACTIVE", "TERMINATED"):
             tdata.msg.body = pjsip_msg_body_create(tdata.pool, &_content_type.pj_str, &_content_subtype.pj_str, &self._sipfrag_payload.pj_str)
-            # this leads to a randomly corrupted Content-Type header, don't ask -adi
-            #_dict_to_pjsip_param(_sipfrag_version, &tdata.msg.body.content_type.param, tdata.pool)
+            _dict_to_pjsip_param(_sipfrag_version, &tdata.msg.body.content_type.param, tdata.pool)
         with nogil:
             status = pjsip_evsub_send_request(self._transfer_usage, tdata)
         if status != 0:
@@ -1279,13 +1276,10 @@ cdef class Invitation:
             raise PJSIPError("failed to acquire lock", status)
         try:
             prev_state = self.transfer_state
-            timer_state = timer.state.decode()
-
-            self._set_transfer_state(timer_state)
-
-            if timer_state == "ACCEPTED" and prev_state == "SENT":
+            self._set_transfer_state(timer.state)
+            if timer.state == "ACCEPTED" and prev_state == "SENT":
                 _add_event("SIPInvitationTransferDidStart", dict(obj=self))
-            elif timer_state == "TERMINATED":
+            elif timer.state == "TERMINATED":
                 # If a NOTIFY is rejected with 408 or 481 PJSIP will erase the subscription
                 if self._transfer_usage != NULL:
                     pjsip_evsub_set_mod_data(self._transfer_usage, ua._event_module.id, NULL)
@@ -1345,7 +1339,7 @@ cdef class Invitation:
             raise PJSIPError("failed to acquire lock", status)
         try:
             sub_state_hdr = timer.rdata["headers"].get("Subscription-State", None)
-            if self.transfer_state != "TERMINATED" and sub_state_hdr is not None and sub_state_hdr.expires is not None and sub_state_hdr.expires > 0:
+            if self.transfer_state != "TERMINATED" and sub_state_hdr is not None and sub_state_hdr.expires > 0:
                 if self._transfer_refresh_timer is not None:
                     self._transfer_refresh_timer.cancel()
                     self._transfer_refresh_timer = None
@@ -1413,7 +1407,7 @@ cdef void _Invitation_cb_state(pjsip_inv_session *inv, pjsip_event *e) with gil:
             invitation = (<object> inv.mod_data[ua._module.id])()
             if invitation is None:
                 return
-            state = pjsip_inv_state_name(inv.state).decode().lower()
+            state = pjsip_inv_state_name(inv.state).lower()
             sub_state = None
             if state == "calling":
                 state = "outgoing"

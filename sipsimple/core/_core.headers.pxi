@@ -115,7 +115,7 @@ cdef class BaseContentTypeHeader:
         return "%s: %s" % (self.name, self.body)
 
     def __unicode__(self):
-        return self.__str__().encode()
+        return unicode(self.__str__(), encoding='utf-8')
 
     def __richcmp__(self, other, op):
         return BaseContentTypeHeader_richcmp(self, other, op)
@@ -130,7 +130,7 @@ cdef class BaseContentTypeHeader:
         def __get__(self):
             if self.parameters:
                 parameters = ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             return self.content_type + parameters
@@ -221,7 +221,7 @@ cdef class BaseContactHeader:
         return "%s: %s" % (self.name, self.body)
 
     def __unicode__(self):
-        return self.__str__().encode()
+        return unicode(self.__str__(), encoding='utf-8')
 
     def __richcmp__(self, other, op):
         return BaseContactHeader_richcmp(self, other, op)
@@ -238,11 +238,11 @@ cdef class BaseContactHeader:
                 return "*"
             if self.parameters:
                 parameters = ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             if self.display_name:
-                return '"%s" <%s>%s' % (self.display_name, self.uri, parameters)
+                return '"%s" <%s>%s' % (self.display_name.encode('utf-8'), self.uri, parameters)
             else:
                 return '<%s>%s' % (self.uri, parameters)
 
@@ -386,7 +386,7 @@ cdef class BaseIdentityHeader:
         return "%s: %s" % (self.name, self.body)
 
     def __unicode__(self):
-        return self.__str__().encode()
+        return unicode(self.__str__(), encoding='utf-8')
 
     def __richcmp__(self, other, op):
         return BaseIdentityHeader_richcmp(self, other, op)
@@ -396,11 +396,11 @@ cdef class BaseIdentityHeader:
         def __get__(self):
             if self.parameters:
                 parameters = ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             if self.display_name:
-                return '"%s" <%s>%s' % (self.display_name, self.uri, parameters)
+                return '"%s" <%s>%s' % (self.display_name.encode('utf-8'), self.uri, parameters)
             else:
                 return '<%s>%s' % (self.uri, parameters)
 
@@ -640,7 +640,7 @@ cdef class BaseRetryAfterHeader:
                 string += " (%s)" % self.comment
             if self.parameters:
                 string += ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                          for name, value in list(self.parameters.items())])
+                                          for name, value in self.parameters.iteritems()])
             return string
 
 def RetryAfterHeader_new(cls, BaseRetryAfterHeader header):
@@ -747,7 +747,7 @@ cdef class BaseViaHeader:
             string = "SIP/2.0/%s %s:%d" % (self.transport, self.host, self.port)
             if self.parameters:
                 string += ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                          for name, value in list(self.parameters.items())])
+                                          for name, value in self.parameters.iteritems()])
             return string
 
 def ViaHeader_new(cls, BaseViaHeader header):
@@ -1070,7 +1070,7 @@ cdef class BaseEventHeader:
         def __get__(self):
             if self.parameters:
                 parameters = ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             return self.event + parameters
@@ -1170,7 +1170,7 @@ cdef class BaseSubscriptionStateHeader:
         def __get__(self):
             if self.parameters:
                 parameters = ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             return self.state + parameters
@@ -1312,7 +1312,7 @@ cdef class BaseReasonHeader:
         def __get__(self):
             if self.parameters:
                 parameters = " ;" + " ;".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             return self.protocol + parameters
@@ -1438,7 +1438,7 @@ cdef class BaseReferToHeader:
         def __get__(self):
             if self.parameters:
                 parameters = ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                             for name, value in list(self.parameters.items())])
+                                             for name, value in self.parameters.iteritems()])
             else:
                 parameters = ""
             return "<%s>%s" % (self.uri, parameters)
@@ -1507,7 +1507,7 @@ cdef class BaseSubjectHeader:
         return "%s: %s" % (self.name, self.body)
 
     def __unicode__(self):
-        return self.__str__().encode()
+        return unicode(self.__str__(), encoding='utf-8')
 
     def __richcmp__(self, other, op):
         return BaseSubjectHeader_richcmp(self, other, op)
@@ -1571,6 +1571,17 @@ cdef object BaseReplacesHeader_richcmp(object self, object other, int op) with g
     else:
         return self.call_id != other.call_id or self.from_tag != other.from_tag or self.to_tag != other.to_tag or self.early_only != other.early_only or self.parameters != other.parameters
 
+
+cdef object BaseGatewayIdHeader_richcmp(object self, object other, int op) with gil:
+    if op not in (2, 3):
+        return NotImplemented
+    if not isinstance(other, BaseGatewayIdHeader):
+        return NotImplemented
+    if op == 2:
+        return self.call_id == other.call_id and self.from_tag == other.from_tag and self.to_tag == other.to_tag and self.early_only == other.early_only and self.parameters == other.parameters
+    else:
+        return self.call_id != other.call_id or self.from_tag != other.from_tag or self.to_tag != other.to_tag or self.early_only != other.early_only or self.parameters != other.parameters
+
 cdef class BaseReplacesHeader:
     normal_type = ReplacesHeader
     frozen_type = FrozenReplacesHeader
@@ -1600,11 +1611,48 @@ cdef class BaseReplacesHeader:
                 string += ";early-only"
             if self.parameters:
                 string += ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
-                                          for name, value in list(self.parameters.items())])
+                                          for name, value in self.parameters.iteritems()])
+            return string
+
+cdef class BaseGatewayIdHeader:
+    normal_type = GatewayIdHeader
+    frozen_type = FrozenGatewayIdHeader
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("BaseGatewayIdHeader cannot be instantiated directly")
+
+    def __repr__(self):
+        return "%s(%r, %r, %r, %r, %r)" % (self.__class__.__name__, self.call_id, self.from_tag, self.to_tag, self.early_only, self.parameters)
+
+    def __str__(self):
+        return "%s: %s" % (self.name, self.body)
+
+    def __richcmp__(self, other, op):
+        return BaseGatewayIdHeader_richcmp(self, other, op)
+
+    property name:
+
+        def __get__(self):
+            return "GatewayId"
+
+    property body:
+
+        def __get__(self):
+            string = "%s;from-tag=%s;to-tag=%s" % (self.call_id, self.from_tag, self.to_tag)
+            if self.early_only:
+                string += ";early-only"
+            if self.parameters:
+                string += ";" + ";".join(["%s%s" % (name, "" if value is None else "=%s" % value)
+                                          for name, value in self.parameters.iteritems()])
             return string
 
 def ReplacesHeader_new(cls, BaseReplacesHeader header):
     return cls(header.call_id, header.from_tag, header.to_tag, header.early_only, dict(header.parameters))
+
+
+def GatewayIdHeader_new(cls, BaseGatewayIdHeader header):
+    return cls(header.call_id, header.from_tag, header.to_tag, header.early_only, dict(header.parameters))
+
 
 cdef class ReplacesHeader(BaseReplacesHeader):
     def __init__(self, str call_id not None, str from_tag not None, str to_tag not None, int early_only=0, dict parameters=None):
@@ -1624,12 +1672,37 @@ cdef class ReplacesHeader(BaseReplacesHeader):
 
     new = classmethod(ReplacesHeader_new)
 
+
+cdef class GatewayIdHeader(BaseGatewayIdHeader):
+    def __init__(self, str call_id not None, str from_tag not None, str to_tag not None, int early_only=0, dict parameters=None):
+        self.call_id = call_id
+        self.from_tag = from_tag
+        self.to_tag = to_tag
+        self.early_only = early_only
+        self.parameters = parameters if parameters is not None else {}
+
+    property parameters:
+
+        def __get__(self):
+            return self._parameters
+
+        def __set__(self, dict parameters not None):
+            self._parameters = parameters
+
+    new = classmethod(GatewayIdHeader_new)
+
 del ReplacesHeader_new
+del GatewayIdHeader_new
+
+def FrozenGatewayIdHeader_new(cls, BaseGatewayIdHeader header):
+    if isinstance(header, cls):
+        return header
+    return cls(header.call_id, header.from_tag, header.to_tag, header.early_only, frozendict(header.parameters))
 
 def FrozenReplacesHeader_new(cls, BaseReplacesHeader header):
     if isinstance(header, cls):
         return header
-    return cls(header.call_id, header.header.from_tag, header.to_tag, header.early_only, frozendict(header.parameters))
+    return cls(header.call_id, header.from_tag, header.to_tag, header.early_only, frozendict(header.parameters))
 
 cdef class FrozenReplacesHeader(BaseReplacesHeader):
     def __init__(self, str call_id not None, str from_tag not None, str to_tag not None, int early_only=0, frozendict parameters not None=frozendict()):
@@ -1649,7 +1722,27 @@ cdef class FrozenReplacesHeader(BaseReplacesHeader):
 
     new = classmethod(FrozenReplacesHeader_new)
 
+
+cdef class FrozenGatewayIdHeader(BaseGatewayIdHeader):
+    def __init__(self, str call_id not None, str from_tag not None, str to_tag not None, int early_only=0, frozendict parameters not None=frozendict()):
+        if not self.initialized:
+            self.call_id = call_id
+            self.from_tag = from_tag
+            self.to_tag = to_tag
+            self.early_only = early_only
+            self.parameters = parameters
+            self.initialized = 1
+
+    def __hash__(self):
+        return hash((self.call_id, self.from_tag, self.to_tag, self.early_only, self.parameters))
+
+    def __richcmp__(self, other, op):
+        return BaseGatewayIdHeader_richcmp(self, other, op)
+
+    new = classmethod(FrozenGatewayIdHeader_new)
+
 del FrozenReplacesHeader_new
+del FrozenGatewayIdHeader_new
 
 
 # Factory functions
@@ -1669,7 +1762,7 @@ cdef ContactHeader ContactHeader_create(pjsip_contact_hdr *header):
         uri = SIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(header.uri))
         name_addr = <pjsip_name_addr*> header.uri
         if name_addr.display.slen > 0:
-            display_name = _pj_str_to_str(name_addr.display)
+            display_name = unicode(_pj_str_to_str(name_addr.display), encoding='utf-8')
         else:
             display_name = None
         parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1687,7 +1780,7 @@ cdef FrozenContactHeader FrozenContactHeader_create(pjsip_contact_hdr *header):
         uri = FrozenSIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(header.uri))
         name_addr = <pjsip_name_addr*> header.uri
         if name_addr.display.slen > 0:
-            display_name = _pj_str_to_str(name_addr.display)
+            display_name = unicode(_pj_str_to_str(name_addr.display), encoding='utf-8')
         else:
             display_name = None
         parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1722,7 +1815,7 @@ cdef FromHeader FromHeader_create(pjsip_fromto_hdr *header):
     uri = SIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(header.uri))
     name_addr = <pjsip_name_addr*> header.uri
     if name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(name_addr.display)
+        display_name = unicode(_pj_str_to_str(name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1735,7 +1828,7 @@ cdef FrozenFromHeader FrozenFromHeader_create(pjsip_fromto_hdr *header):
     uri = FrozenSIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(header.uri))
     name_addr = <pjsip_name_addr*> header.uri
     if name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(name_addr.display)
+        display_name = unicode(_pj_str_to_str(name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1748,7 +1841,7 @@ cdef ToHeader ToHeader_create(pjsip_fromto_hdr *header):
     uri = SIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(header.uri))
     name_addr = <pjsip_name_addr*> header.uri
     if name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(name_addr.display)
+        display_name = unicode(_pj_str_to_str(name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1761,7 +1854,7 @@ cdef FrozenToHeader FrozenToHeader_create(pjsip_fromto_hdr *header):
     uri = FrozenSIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(header.uri))
     name_addr = <pjsip_name_addr*> header.uri
     if name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(name_addr.display)
+        display_name = unicode(_pj_str_to_str(name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1772,7 +1865,7 @@ cdef FrozenToHeader FrozenToHeader_create(pjsip_fromto_hdr *header):
 cdef RouteHeader RouteHeader_create(pjsip_routing_hdr *header):
     uri = SIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(<pjsip_uri *>&header.name_addr))
     if header.name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(header.name_addr.display)
+        display_name = unicode(_pj_str_to_str(header.name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1781,7 +1874,7 @@ cdef RouteHeader RouteHeader_create(pjsip_routing_hdr *header):
 cdef FrozenRouteHeader FrozenRouteHeader_create(pjsip_routing_hdr *header):
     uri = FrozenSIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(<pjsip_uri *>&header.name_addr))
     if header.name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(header.name_addr.display)
+        display_name = unicode(_pj_str_to_str(header.name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = frozendict(_pjsip_param_to_dict(&header.other_param))
@@ -1790,7 +1883,7 @@ cdef FrozenRouteHeader FrozenRouteHeader_create(pjsip_routing_hdr *header):
 cdef RecordRouteHeader RecordRouteHeader_create(pjsip_routing_hdr *header):
     uri = SIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(<pjsip_uri *>&header.name_addr))
     if header.name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(header.name_addr.display)
+        display_name = unicode(_pj_str_to_str(header.name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = _pjsip_param_to_dict(&header.other_param)
@@ -1799,7 +1892,7 @@ cdef RecordRouteHeader RecordRouteHeader_create(pjsip_routing_hdr *header):
 cdef FrozenRecordRouteHeader FrozenRecordRouteHeader_create(pjsip_routing_hdr *header):
     uri = FrozenSIPURI_create(<pjsip_sip_uri*>pjsip_uri_get_uri(<pjsip_uri *>&header.name_addr))
     if header.name_addr.display.slen > 0:
-        display_name = _pj_str_to_str(header.name_addr.display)
+        display_name = unicode(_pj_str_to_str(header.name_addr.display), encoding='utf-8')
     else:
         display_name = None
     parameters = frozendict(_pjsip_param_to_dict(&header.other_param))
@@ -1914,11 +2007,11 @@ cdef FrozenReferToHeader FrozenReferToHeader_create(pjsip_generic_string_hdr *he
     return FrozenReferToHeader(uri, frozendict(parameters))
 
 cdef SubjectHeader SubjectHeader_create(pjsip_generic_string_hdr *header):
-    subject = _pj_str_to_str((<pjsip_generic_string_hdr *>header).hvalue)
+    subject = unicode(_pj_str_to_str((<pjsip_generic_string_hdr *>header).hvalue), encoding='utf-8')
     return SubjectHeader(subject)
 
 cdef FrozenSubjectHeader FrozenSubjectHeader_create(pjsip_generic_string_hdr *header):
-    subject = _pj_str_to_str((<pjsip_generic_string_hdr *>header).hvalue)
+    subject = unicode(_pj_str_to_str((<pjsip_generic_string_hdr *>header).hvalue), encoding='utf-8')
     return FrozenSubjectHeader(subject)
 
 cdef ReplacesHeader ReplacesHeader_create(pjsip_replaces_hdr *header):

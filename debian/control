@@ -1,47 +1,46 @@
-Source: python3-sipsimple
+Source: python-sipsimple
 Section: python
 Priority: optional
-Maintainer: Adrian Georgescu <ag@ag-projects.com>
-Uploaders: Tijmen de Mes <tijmen@ag-projects.com>
-Build-Depends: debhelper (>= 11), python3,
+Maintainer: Dan Pascu <dan@ag-projects.com>
+Uploaders: Adrian Georgescu <ag@ag-projects.com>
+Build-Depends: debhelper (>= 9),
                dh-python,
-               python3-all-dev,
-               cython3,
+               python-all-dev (>= 2.7),
+               python-all-dbg (>= 2.7),
+               cython-dbg (>= 0.19),
                libasound2-dev,
                libssl-dev,
                libv4l-dev,
-               libavcodec-dev,
-               libavformat-dev,
-               libopencore-amrnb-dev,
-               libopencore-amrwb-dev,
-               libavutil-dev,
-               libswscale-dev,
+               libavcodec-dev (>= 7:2.7),
+               libavformat-dev (>= 7:2.7),
+               libavutil-dev (>= 7:2.7),
+               libswscale-dev (>= 7:2.7),
                libx264-dev,
                libvpx-dev,
-               libopus-dev,
                libsqlite3-dev,
                pkg-config,
                uuid-dev
-Standards-Version: 4.5.0
-Homepage: https://sipsimpleclient.org
+Standards-Version: 3.9.8
+Homepage: http://sipsimpleclient.org
 
-Package: python3-sipsimple
+Package: python-sipsimple
 Architecture: any
-Depends: ${python3:Depends}, ${shlibs:Depends}, ${misc:Depends},
-         python3-application,
-         python3-dateutil,
-         python3-dnspython,
-         python3-eventlib,
-         python3-gevent,
-         python3-gnutls,
-         python3-lxml,
-         python3-msrplib,
-         python3-otr,
-         python3-twisted,
-         python3-xcaplib
+Depends: ${python:Depends}, ${shlibs:Depends}, ${misc:Depends},
+         python-application (>= 2.5.0),
+         python-dateutil,
+         python-dnspython (>= 1.9),
+         python-eventlib,
+         python-gnutls,
+         python-lxml,
+         python-msrplib (>= 0.19.0),
+         python-otr (>= 1.2.0),
+         python-twisted-core (>= 8.1.0),
+         python-xcaplib (>= 1.0.17)
 Suggests: libavahi-compat-libdnssd1
-Provides: ${python3:Provides}
-Description: SIP SIMPLE SDK is a Python library for desktop operating
- systems designed for the development of real time communications
- applications based on SIP protocol and related media like audio, video,
- messaging, file transfers, desktop sharing and presence.
+Provides: ${python:Provides}
+Description: Python SDK for development of SIP end-points
+ SIP SIMPLE client SDK is a Software Development Kit for easy development of
+ SIP end-points that support rich media like Audio, Video, Instant Messaging,
+ File Transfers, Desktop Sharing and Presence. Other media types can be added
+ by using an extensible high-level API.
+

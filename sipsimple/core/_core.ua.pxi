@@ -73,16 +73,15 @@ cdef class PJSIPUA:
 
     def __init__(self, event_handler, *args, **kwargs):
         global _event_queue_lock
-        cdef object event
-        cdef object method
+        cdef str event
+        cdef str method
         cdef list accept_types
         cdef int status
-
-        cdef PJSTR message_method = PJSTR(b"MESSAGE")
-        cdef PJSTR refer_method = PJSTR(b"REFER")
-        cdef PJSTR str_norefersub = PJSTR(b"norefersub")
-        cdef PJSTR str_gruu = PJSTR(b"gruu")
-
+        cdef PJSTR message_method = PJSTR("MESSAGE")
+        cdef PJSTR info_method = PJSTR("INFO")
+        cdef PJSTR refer_method = PJSTR("REFER")
+        cdef PJSTR str_norefersub = PJSTR("norefersub")
+        cdef PJSTR str_gruu = PJSTR("gruu")
         self._event_handler = event_handler
         if kwargs["log_level"] < 0 or kwargs["log_level"] > PJ_LOG_MAX_LEVEL:
             raise ValueError("Log level should be between 0 and %d" % PJ_LOG_MAX_LEVEL)
@@ -101,12 +100,10 @@ cdef class PJSIPUA:
         status = pj_mutex_create_simple(self._pjsip_endpoint._pool, "event_queue_lock", &_event_queue_lock)
         if status != 0:
             raise PJSIPError("Could not initialize event queue mutex", status)
-
-        self._ip_address = kwargs["ip_address"].encode() if kwargs["ip_address"] else None
-        self.codecs = list(codec.encode() for codec in kwargs["codecs"] if codec in self.available_codecs)
-        self.video_codecs = list(codec.encode() for codec in kwargs["video_codecs"] if codec in self.available_video_codecs)
-
-        self._module_name = PJSTR(b"mod-core")
+        self._ip_address = kwargs["ip_address"]
+        self.codecs = kwargs["codecs"]
+        self.video_codecs = kwargs["video_codecs"]
+        self._module_name = PJSTR("mod-core")
         self._module.name = self._module_name.pj_str
         self._module.id = -1
         self._module.priority = PJSIP_MOD_PRIORITY_APPLICATION
@@ -115,11 +112,16 @@ cdef class PJSIPUA:
         status = pjsip_endpt_register_module(self._pjsip_endpoint._obj, &self._module)
         if status != 0:
             raise PJSIPError("Could not load application module", status)
-
         status = pjsip_endpt_add_capability(self._pjsip_endpoint._obj, &self._module,
                                             PJSIP_H_ALLOW, NULL, 1, &message_method.pj_str)
         if status != 0:
             raise PJSIPError("Could not add MESSAGE method to supported methods", status)
+
+        status = pjsip_endpt_add_capability(self._pjsip_endpoint._obj, &self._module,
+                                            PJSIP_H_ALLOW, NULL, 1, &info_method.pj_str)
+        if status != 0:
+            raise PJSIPError("Could not add INFO method to supported methods", status)
+
         status = pjsip_endpt_add_capability(self._pjsip_endpoint._obj, &self._module,
                                             PJSIP_H_ALLOW, NULL, 1, &refer_method.pj_str)
         if status != 0:
@@ -132,8 +134,10 @@ cdef class PJSIPUA:
                                             PJSIP_H_SUPPORTED, NULL, 1, &str_gruu.pj_str)
         if status != 0:
             raise PJSIPError("Could not add 'gruu' to Supported header", status)
-
-        self._opus_fix_module_name = PJSTR(b"mod-core-opus-fix")
+        self._trace_sip = int(bool(kwargs["trace_sip"]))
+        self._detect_sip_loops = int(bool(kwargs["detect_sip_loops"]))
+        self._enable_colorbar_device = int(bool(kwargs["enable_colorbar_device"]))
+        self._opus_fix_module_name = PJSTR("mod-core-opus-fix")
         self._opus_fix_module.name = self._opus_fix_module_name.pj_str
         self._opus_fix_module.id = -1
         self._opus_fix_module.priority = PJSIP_MOD_PRIORITY_TRANSPORT_LAYER+1
@@ -144,8 +148,7 @@ cdef class PJSIPUA:
         status = pjsip_endpt_register_module(self._pjsip_endpoint._obj, &self._opus_fix_module)
         if status != 0:
             raise PJSIPError("Could not load opus-fix module", status)
-
-        self._trace_module_name = PJSTR(b"mod-core-sip-trace")
+        self._trace_module_name = PJSTR("mod-core-sip-trace")
         self._trace_module.name = self._trace_module_name.pj_str
         self._trace_module.id = -1
         self._trace_module.priority = 0
@@ -156,8 +159,7 @@ cdef class PJSIPUA:
         status = pjsip_endpt_register_module(self._pjsip_endpoint._obj, &self._trace_module)
         if status != 0:
             raise PJSIPError("Could not load sip trace module", status)
-
-        self._ua_tag_module_name = PJSTR(b"mod-core-ua-tag")
+        self._ua_tag_module_name = PJSTR("mod-core-ua-tag")
         self._ua_tag_module.name = self._ua_tag_module_name.pj_str
         self._ua_tag_module.id = -1
         self._ua_tag_module.priority = PJSIP_MOD_PRIORITY_TRANSPORT_LAYER+1
@@ -166,46 +168,37 @@ cdef class PJSIPUA:
         status = pjsip_endpt_register_module(self._pjsip_endpoint._obj, &self._ua_tag_module)
         if status != 0:
             raise PJSIPError("Could not load User-Agent/Server header tagging module", status)
-
-        self._event_module_name = PJSTR(b"mod-core-events")
+        self._event_module_name = PJSTR("mod-core-events")
         self._event_module.name = self._event_module_name.pj_str
         self._event_module.id = -1
         self._event_module.priority = PJSIP_MOD_PRIORITY_DIALOG_USAGE
         status = pjsip_endpt_register_module(self._pjsip_endpoint._obj, &self._event_module)
         if status != 0:
             raise PJSIPError("Could not load events module", status)
-
-        self._trace_sip = int(bool(kwargs["trace_sip"]))
-        self._detect_sip_loops = int(bool(kwargs["detect_sip_loops"]))
-        self._enable_colorbar_device = int(bool(kwargs["enable_colorbar_device"]))
-        self._user_agent = PJSTR(kwargs["user_agent"].encode())
-        self.rtp_port_range = kwargs["rtp_port_range"]
-        self.zrtp_cache = kwargs["zrtp_cache"].encode() if kwargs["zrtp_cache"] else None
-
         status = pjmedia_aud_dev_set_observer_cb(_cb_audio_dev_process_event);
         if status != 0:
             raise PJSIPError("Could not set audio_change callbacks", status)
-
         status = pj_rwmutex_create(self._pjsip_endpoint._pool, "ua_audio_change_rwlock", &self.audio_change_rwlock)
         if status != 0:
             raise PJSIPError("Could not initialize audio change rwmutex", status)
-
         status = pj_mutex_create_recursive(self._pjsip_endpoint._pool, "ua_video_lock", &self.video_lock)
         if status != 0:
             raise PJSIPError("Could not initialize video mutex", status)
-
+        self._user_agent = PJSTR(kwargs["user_agent"])
         for event, accept_types in kwargs["events"].iteritems():
             self.add_event(event, accept_types)
-
         for event in kwargs["incoming_events"]:
-            if event not in self._events.keys():
+            if event not in self._events.iterkeys():
                 raise ValueError('Event "%s" is not known' % event)
             self._incoming_events.add(event)
-
         for method in kwargs["incoming_requests"]:
+            method = method.upper()
             if method in ("ACK", "BYE", "INVITE", "REFER", "SUBSCRIBE"):
                 raise ValueError('Handling incoming "%s" requests is not allowed' % method)
-            self._incoming_requests.add(method.encode())
+            self._incoming_requests.add(method)
+        self._incoming_requests.add(info_method)
+        self.rtp_port_range = kwargs["rtp_port_range"]
+        self.zrtp_cache = kwargs["zrtp_cache"]
         pj_stun_config_init(&self._stun_cfg, &self._caching_pool._obj.factory, 0,
                             pjmedia_endpt_get_ioqueue(self._pjmedia_endpoint._obj),
                             pjsip_endpt_get_timer_heap(self._pjsip_endpoint._obj))
@@ -279,15 +272,15 @@ cdef class PJSIPUA:
             self._check_self()
             return self._incoming_events.copy()
 
-    def add_incoming_event(self, object event):
+    def add_incoming_event(self, str event):
         self._check_self()
-        if event not in self._events.keys():
+        if event not in self._events.iterkeys():
             raise ValueError('Event "%s" is not known' % event)
         self._incoming_events.add(event)
 
-    def remove_incoming_event(self, object event):
+    def remove_incoming_event(self, str event):
         self._check_self()
-        if event not in self._events.keys():
+        if event not in self._events.iterkeys():
             raise ValueError('Event "%s" is not known' % event)
         self._incoming_events.discard(event)
 
@@ -297,17 +290,21 @@ cdef class PJSIPUA:
             self._check_self()
             return self._incoming_requests.copy()
 
-    def add_incoming_request(self, object method):
+    def add_incoming_request(self, object value):
+        cdef str method
         self._check_self()
+        method = value.upper()
         if method in ("ACK", "BYE", "INVITE", "REFER", "SUBSCRIBE"):
             raise ValueError('Handling incoming "%s" requests is not allowed' % method)
-        self._incoming_requests.add(method.encode())
+        self._incoming_requests.add(method)
 
-    def remove_incoming_request(self, object method):
+    def remove_incoming_request(self, object value):
+        cdef str method
         self._check_self()
+        method = value.upper()
         if method in ("ACK", "BYE", "INVITE", "REFER", "SUBSCRIBE"):
             raise ValueError('Handling incoming "%s" requests is not allowed' % method)
-        self._incoming_requests.discard(method.encode())
+        self._incoming_requests.discard(method)
 
     cdef pj_pool_t* create_memory_pool(self, bytes name, int initial_size, int resize_size):
         cdef pj_pool_t *pool
@@ -630,7 +627,7 @@ cdef class PJSIPUA:
 
         def __set__(self, value):
             self._check_self()
-            self._user_agent = PJSTR(b"value")
+            self._user_agent = PJSTR("value")
 
     property log_level:
 
@@ -726,9 +723,9 @@ cdef class PJSIPUA:
         cdef pj_sockaddr_in stun_server
         cdef int status
         self._check_self()
-        if not _is_valid_ip(pj_AF_INET(), stun_server_address.encode()):
+        if not _is_valid_ip(pj_AF_INET(), stun_server_address):
             raise ValueError("Not a valid IPv4 address: %s" % stun_server_address)
-        _str_to_pj_str(stun_server_address.encode(), &stun_server_address_pj)
+        _str_to_pj_str(stun_server_address, &stun_server_address_pj)
         status = pj_sockaddr_in_init(&stun_server, &stun_server_address_pj, stun_server_port)
         if status != 0:
             raise PJSIPError("Could not init STUN server address", status)
@@ -902,8 +899,8 @@ cdef class PJSIPUA:
         cdef pjsip_transaction *tsx = NULL
         cdef unsigned int options = PJSIP_INV_SUPPORT_100REL
         cdef pjsip_event_hdr *event_hdr
-        cdef object method_name = _pj_str_to_bytes(rdata.msg_info.msg.line.req.method.name)
-        if method_name != b"ACK":
+        cdef object method_name = _pj_str_to_str(rdata.msg_info.msg.line.req.method.name)
+        if method_name != "ACK":
             if self._detect_sip_loops:
                 # Temporarily trick PJSIP into believing the last Via header is actually the first
                 top_via = via = rdata.msg_info.via
@@ -925,7 +922,7 @@ cdef class PJSIPUA:
         elif method_name in self._incoming_requests:
             request = IncomingRequest()
             request.init(self, rdata)
-        elif method_name == b"OPTIONS":
+        elif method_name == "OPTIONS":
             status = pjsip_endpt_create_response(self._pjsip_endpoint._obj, rdata, 200, NULL, &tdata)
             if status != 0:
                 raise PJSIPError("Could not create response", status)
@@ -933,24 +930,24 @@ cdef class PJSIPUA:
                 hdr_add = pjsip_endpt_get_capability(self._pjsip_endpoint._obj, hdr_type, NULL)
                 if hdr_add != NULL:
                     pjsip_msg_add_hdr(tdata.msg, <pjsip_hdr *> pjsip_hdr_clone(tdata.pool, hdr_add))
-        elif method_name == b"INVITE":
+        elif method_name == "INVITE":
             status = pjsip_inv_verify_request(rdata, &options, NULL, NULL, self._pjsip_endpoint._obj, &tdata)
             if status == 0:
                 inv = Invitation()
                 inv.init_incoming(self, rdata, options)
-        elif method_name == b"SUBSCRIBE":
+        elif method_name == "SUBSCRIBE":
             event_hdr = <pjsip_event_hdr *> pjsip_msg_find_hdr_by_name(rdata.msg_info.msg, &_event_hdr_name.pj_str, NULL)
-            if event_hdr == NULL or _pj_str_to_bytes(event_hdr.event_type) not in self._incoming_events:
+            if event_hdr == NULL or _pj_str_to_str(event_hdr.event_type) not in self._incoming_events:
                 status = pjsip_endpt_create_response(self._pjsip_endpoint._obj, rdata, 489, NULL, &tdata)
                 if status != 0:
                     raise PJSIPError("Could not create response", status)
             else:
                 sub = IncomingSubscription()
-                sub.init(self, rdata, _pj_str_to_bytes(event_hdr.event_type))
-        elif method_name == b"REFER":
+                sub.init(self, rdata, _pj_str_to_str(event_hdr.event_type))
+        elif method_name == "REFER":
             ref = IncomingReferral()
             ref.init(self, rdata)
-        elif method_name == b"MESSAGE":
+        elif method_name == "MESSAGE":
             bad_request = 0
             extra_headers = list()
             message_params = dict()
@@ -982,7 +979,7 @@ cdef class PJSIPUA:
                 status = pjsip_endpt_create_response(self._pjsip_endpoint._obj, rdata, 200, NULL, &tdata)
                 if status != 0:
                     raise PJSIPError("Could not create response", status)
-        elif method_name != b"ACK":
+        elif method_name != "ACK":
             status = pjsip_endpt_create_response(self._pjsip_endpoint._obj, rdata, 405, NULL, &tdata)
             if status != 0:
                 raise PJSIPError("Could not create response", status)
@@ -996,8 +993,7 @@ cdef class PJSIPUA:
 
 cdef class PJSIPThread:
     def __cinit__(self):
-        str_id = "python_%d" % id(self)
-        cdef object thread_name = str_id.encode()
+        cdef object thread_name = "python_%d" % id(self)
         cdef int status
         status = pj_thread_register(thread_name, self._thread_desc, &self._obj)
         if status != 0:
@@ -1074,6 +1070,8 @@ cdef int _cb_opus_fix_tx(pjsip_tx_data *tdata) with gil:
     cdef pjmedia_sdp_session *sdp
     cdef pjmedia_sdp_media *media
     cdef pjmedia_sdp_attr *attr
+    cdef int i
+    cdef int j
     cdef pj_str_t new_value
     try:
         ua = _get_ua()
@@ -1099,10 +1097,9 @@ cdef int _cb_opus_fix_tx(pjsip_tx_data *tdata) with gil:
                             continue
                         # this is the opus rtpmap attribute
                         opus_line = attr_value[:pos] + "opus/48000/2"
-                        opus_line = opus_line.encode()
                         new_value.slen = len(opus_line)
                         new_value.ptr = <char *> pj_pool_alloc(tdata.pool, new_value.slen)
-                        memcpy(new_value.ptr, PyBytes_AsString(opus_line), new_value.slen)
+                        memcpy(new_value.ptr, PyString_AsString(opus_line), new_value.slen)
                         attr.value = new_value
                         break
                 tdata.msg.body = new_body
@@ -1125,15 +1122,15 @@ cdef int _cb_opus_fix_rx(pjsip_rx_data *rdata) with gil:
             body = rdata.msg_info.msg.body
             if body != NULL and _pj_str_to_str(body.content_type.type).lower() == "application" and _pj_str_to_str(body.content_type.subtype).lower() == "sdp":
                 body_ptr = <char*>body.data
-                body_str = _pj_buf_len_to_str(body_ptr, body.len).decode().lower()
+                body_str = PyString_FromStringAndSize(body_ptr, body.len).lower()
                 pos1 = body_str.find("opus/48000")
                 if pos1 != -1:
                     pos2 = body_str.find("opus/48000/2")
                     if pos2 != -1:
-                        memcpy(body_ptr + pos2 + 11, b'1', 1)
+                        memcpy(body_ptr + pos2 + 11, '1', 1)
                     else:
                         # old opus, we must make it fail
-                        memcpy(body_ptr + pos1 + 5, b'XXXXX', 5)
+                        memcpy(body_ptr + pos1 + 5, 'XXXXX', 5)
     except:
         ua._handle_exception(0)
     return 0
@@ -1147,13 +1144,11 @@ cdef int _cb_trace_rx(pjsip_rx_data *rdata) with gil:
     try:
         if ua._trace_sip:
             _add_event("SIPEngineSIPTrace",
-                        dict(received=True,
-                             source_ip=rdata.pkt_info.src_name.decode(),
-                             source_port=rdata.pkt_info.src_port,
+                        dict(received=True, source_ip=rdata.pkt_info.src_name, source_port=rdata.pkt_info.src_port,
                              destination_ip=_pj_str_to_str(rdata.tp_info.transport.local_name.host),
                              destination_port=rdata.tp_info.transport.local_name.port,
-                             data=_pj_buf_len_to_str(rdata.pkt_info.packet, rdata.pkt_info.len),
-                             transport=rdata.tp_info.transport.type_name.decode()))
+                             data=PyString_FromStringAndSize(rdata.pkt_info.packet, rdata.pkt_info.len),
+                             transport=rdata.tp_info.transport.type_name))
     except:
         ua._handle_exception(0)
     return 0
@@ -1169,11 +1164,10 @@ cdef int _cb_trace_tx(pjsip_tx_data *tdata) with gil:
             _add_event("SIPEngineSIPTrace",
                         dict(received=False,
                              source_ip=_pj_str_to_str(tdata.tp_info.transport.local_name.host),
-                             source_port=tdata.tp_info.transport.local_name.port,
-                             destination_ip=tdata.tp_info.dst_name.decode(),
+                             source_port=tdata.tp_info.transport.local_name.port, destination_ip=tdata.tp_info.dst_name,
                              destination_port=tdata.tp_info.dst_port,
-                             data=_pj_buf_len_to_str(tdata.buf.start, tdata.buf.cur - tdata.buf.start),
-                             transport=tdata.tp_info.transport.type_name.decode()))
+                             data=PyString_FromStringAndSize(tdata.buf.start, tdata.buf.cur - tdata.buf.start),
+                             transport=tdata.tp_info.transport.type_name))
     except:
         ua._handle_exception(0)
     return 0
@@ -1236,7 +1230,7 @@ cdef int deallocate_weakref(object weak_ref, object timer) except -1 with gil:
 # globals
 
 cdef void *_ua = NULL
-cdef PJSTR _user_agent_hdr_name = PJSTR(b"User-Agent")
-cdef PJSTR _server_hdr_name = PJSTR(b"Server")
-cdef PJSTR _event_hdr_name = PJSTR(b"Event")
+cdef PJSTR _user_agent_hdr_name = PJSTR("User-Agent")
+cdef PJSTR _server_hdr_name = PJSTR("Server")
+cdef PJSTR _event_hdr_name = PJSTR("Event")
 cdef object _re_ipv4 = re.compile(r"^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$")

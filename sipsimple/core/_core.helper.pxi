@@ -10,17 +10,17 @@ cdef class BaseCredentials:
     def __cinit__(self, *args, **kwargs):
         global _Credentials_scheme_digest, _Credentials_realm_wildcard
         self._credentials.scheme = _Credentials_scheme_digest.pj_str
+        self._credentials.data_type = PJSIP_CRED_DATA_PLAIN_PASSWD
 
-    def __init__(self, object username not None, object password not None, object realm=b'*', bint digest=False):
+    def __init__(self, str username not None, str password not None, str realm='*'):
         if self.__class__ is BaseCredentials:
             raise TypeError("BaseCredentials cannot be instantiated directly")
         self.username = username
         self.realm = realm
         self.password = password
-        self.digest = digest
 
     def __repr__(self):
-        return "%s(username=%r, password=%r, realm=%r, digest=%r)" % (self.__class__.__name__, self.username, self.password, self.realm, self.digest)
+        return "%s(%r, %r, %r)" % (self.__class__.__name__, self.username, self.password, self.realm)
 
     def __str__(self):
         return '<%s for "%s@%s">' % (self.__class__.__name__, self.username, self.realm)
@@ -34,7 +34,7 @@ cdef class Credentials(BaseCredentials):
         def __get__(self):
             return self._username
 
-        def __set__(self, object username not None):
+        def __set__(self, str username not None):
             _str_to_pj_str(username, &self._credentials.username)
             self._username = username
 
@@ -42,7 +42,7 @@ cdef class Credentials(BaseCredentials):
         def __get__(self):
             return self._realm
 
-        def __set__(self, object realm not None):
+        def __set__(self, str realm not None):
             _str_to_pj_str(realm, &self._credentials.realm)
             self._realm = realm
 
@@ -50,55 +50,45 @@ cdef class Credentials(BaseCredentials):
         def __get__(self):
             return self._password
 
-        def __set__(self, object password not None):
+        def __set__(self, str password not None):
             _str_to_pj_str(password, &self._credentials.data)
             self._password = password
 
-    property digest:
-        def __get__(self):
-            return self._digest
-
-        def __set__(self, bint digest):
-            self._credentials.data_type = PJSIP_CRED_DATA_DIGEST if digest else PJSIP_CRED_DATA_PLAIN_PASSWD
-            self._digest = digest
-
     @classmethod
     def new(cls, BaseCredentials credentials):
-        return cls(credentials.username, credentials.password, credentials.realm, credentials.digest)
+        return cls(credentials.username, credentials.password, credentials.realm)
 
 
 cdef class FrozenCredentials(BaseCredentials):
-    def __init__(self, object username not None, object password not None, object realm=b'*', bint digest=False):
+    def __init__(self, str username not None, str password not None, str realm='*'):
         if not self.initialized:
             self.username = username
             self.realm = realm
             self.password = password
-            self.digest = digest
             _str_to_pj_str(self.username, &self._credentials.username)
             _str_to_pj_str(self.realm, &self._credentials.realm)
             _str_to_pj_str(self.password, &self._credentials.data)
-            self._credentials.data_type = PJSIP_CRED_DATA_DIGEST if digest else PJSIP_CRED_DATA_PLAIN_PASSWD
             self.initialized = 1
         else:
             raise TypeError("{0.__class__.__name__} is read-only".format(self))
 
     def __hash__(self):
-        return hash((self.username, self.realm, self.password, self.digest))
+        return hash((self.username, self.realm, self.password))
 
     @classmethod
     def new(cls, BaseCredentials credentials):
         if isinstance(credentials, FrozenCredentials):
             return credentials
-        return cls(credentials.username, credentials.password, credentials.realm, credentials.digest)
+        return cls(credentials.username, credentials.password, credentials.realm)
 
 
 cdef class BaseSIPURI:
     def __init__(self, object host not None, object user=None, object password=None, object port=None, bint secure=False, dict parameters=None, dict headers=None):
         if self.__class__ is BaseSIPURI:
             raise TypeError("BaseSIPURI cannot be instantiated directly")
-        self.host = host.encode() if isinstance(host, str) else host
-        self.user = user.encode() if user and isinstance(user, str) else user
-        self.password = password.encode() if password else None
+        self.host = host
+        self.user = user
+        self.password = password
         self.port = port
         self.secure = secure
         self.parameters = parameters if parameters is not None else {}
@@ -106,13 +96,13 @@ cdef class BaseSIPURI:
 
     property transport:
         def __get__(self):
-            return self.parameters.get('transport', b'udp')
+            return self.parameters.get('transport', 'udp')
 
-        def __set__(self, object transport not None):
-            if transport.decode().lower() == 'udp':
+        def __set__(self, str transport not None):
+            if transport.lower() == 'udp':
                 self.parameters.pop('transport', None)
             else:
-                self.parameters['transport'] = transport.encode()
+                self.parameters['transport'] = transport
 
     def __reduce__(self):
         return self.__class__, (self.host, self.user, self.password, self.port, self.secure, self.parameters, self.headers), None
@@ -121,23 +111,20 @@ cdef class BaseSIPURI:
         return "%s(%r, %r, %r, %r, %r, %r, %r)" % (self.__class__.__name__, self.host, self.user, self.password, self.port, self.secure, self.parameters, self.headers)
 
     def __str__(self):
-        cdef object string = self.host.decode() if isinstance(self.host, bytes) else self.host
-
+        cdef object string = self.host
         if self.port:
             string = "%s:%d" % (string, self.port)
-
         if self.user is not None:
             if self.password is not None:
-                string = "%s:%s@%s" % (self.user.decode() if isinstance(self.user, bytes) else self.user, self.password.decode() if isinstance(self.password, bytes) else self.password, string)
+                string = "%s:%s@%s" % (self.user, self.password, string)
             else:
-                string = "%s@%s" % (self.user.decode() if isinstance(self.user, bytes) else self.user, string)
-
+                string = "%s@%s" % (self.user, string)
         if self.parameters:
-            string += ";" + ";".join(["%s%s" % (name, ("" if val is None else "="+urllib.parse.quote(val, safe="()[]-_.!~*'/:&+$")))
-                                      for name, val in list(self.parameters.items())])
+            string += ";" + ";".join(["%s%s" % (name, ("" if val is None else "="+urllib.quote(val, safe="()[]-_.!~*'/:&+$")))
+                                      for name, val in self.parameters.iteritems()])
         if self.headers:
-            string += "?" + "&".join(["%s%s" % (name, ("" if val is None else "="+urllib.parse.quote(val, safe="()[]-_.!~*'/:?+$")))
-                                      for name, val in self.headers.items()])
+            string += "?" + "&".join(["%s%s" % (name, ("" if val is None else "="+urllib.quote(val, safe="()[]-_.!~*'/:?+$")))
+                                      for name, val in self.headers.iteritems()])
         if self.secure:
             string = "sips:" + string
         else:
@@ -156,7 +143,6 @@ cdef class BaseSIPURI:
             raise TypeError("unorderable types: {0.__class__.__name__}() {2} {1.__class__.__name__}()".format(self, other, operator_map[op]))
 
     def matches(self, address):
-        address = address.decode() if isinstance(address, bytes) else address
         match = re.match(r'^((?P<scheme>sip|sips):)?(?P<username>.+?)(@(?P<domain>.+?)(:(?P<port>\d+?))?)?(;(?P<parameters>.+?))?(\?(?P<headers>.+?))?$', address)
         if match is None:
             return False
@@ -165,21 +151,20 @@ cdef class BaseSIPURI:
             expected_scheme = 'sips' if self.secure else 'sip'
             if components['scheme'] != expected_scheme:
                 return False
-        user = self.user.decode() if self.user else None
-        if components['username'] != user:
+        if components['username'] != self.user:
             return False
-        if components['domain'] is not None and components['domain'] != self.host.decode():
+        if components['domain'] is not None and components['domain'] != self.host:
             return False
         if components['port'] is not None and int(components['port']) != self.port:
             return False
         if components['parameters']:
             parameters = dict([(name, value) for name, sep, value in [param.partition('=') for param in components['parameters'].split(';')]])
-            expected_parameters = dict([(name, str(value) if value is not None else None) for name, value in list(self.parameters.items()) if name in parameters])
+            expected_parameters = dict([(name, str(value) if value is not None else None) for name, value in self.parameters.iteritems() if name in parameters])
             if parameters != expected_parameters:
                 return False
         if components['headers']:
             headers = dict([(name, value) for name, sep, value in [header.partition('=') for header in components['headers'].split('&')]])
-            expected_headers = dict([(name, str(value) if value is not None else None) for name, value in self.headers.items() if name in headers])
+            expected_headers = dict([(name, str(value) if value is not None else None) for name, value in self.headers.iteritems() if name in headers])
             if headers != expected_headers:
                 return False
         return True
@@ -203,7 +188,9 @@ cdef class SIPURI(BaseSIPURI):
 
     @classmethod
     def parse(cls, object uri_str):
-        cdef bytes uri_bytes = uri_str.encode() if isinstance(uri_str, str) else uri_str
+        if not isinstance(uri_str, basestring):
+            raise TypeError('a string or unicode is required')
+        cdef bytes uri_bytes = str(uri_str)
         cdef pjsip_uri *uri = NULL
         cdef pj_pool_t *pool = NULL
         cdef pj_str_t tmp
@@ -262,7 +249,9 @@ cdef class FrozenSIPURI(BaseSIPURI):
 
     @classmethod
     def parse(cls, object uri_str):
-        cdef bytes uri_bytes = uri_str.encode() if isinstance(uri_str, str) else uri_str
+        if not isinstance(uri_str, basestring):
+            raise TypeError('a string or unicode is required')
+        cdef bytes uri_bytes = str(uri_str)
         cdef pjsip_uri *uri = NULL
         cdef pj_pool_t *pool = NULL
         cdef pj_str_t tmp
@@ -287,17 +276,14 @@ cdef dict _pj_sipuri_to_dict(pjsip_sip_uri *uri):
     cdef object parameters = {}
     cdef object headers = {}
     cdef object kwargs = dict(parameters=parameters, headers=headers)
-
+    kwargs["host"] = _pj_str_to_str(uri.host)
     scheme = _pj_str_to_str(pjsip_uri_get_scheme(<pjsip_uri *>uri)[0])
     if scheme == "sip":
         kwargs["secure"] = False
     elif scheme == "sips":
         kwargs["secure"] = True
     else:
-        raise SIPCoreError("Not a valid SIP URI")
-
-    kwargs["host"] = _pj_str_to_str(uri.host)
-
+        raise SIPCoreError("Not a sip(s) URI")
     if uri.user.slen > 0:
         kwargs["user"] = _pj_str_to_str(uri.user)
     if uri.passwd.slen > 0:
@@ -317,7 +303,6 @@ cdef dict _pj_sipuri_to_dict(pjsip_sip_uri *uri):
     if uri.maddr_param.slen > 0:
         parameters["maddr"] = _pj_str_to_str(uri.maddr_param)
     param = <pjsip_param *> (<pj_list *> &uri.other_param).next
-
     while param != &uri.other_param:
         if param.value.slen == 0:
             parameters[_pj_str_to_str(param.name)] = None
@@ -325,7 +310,6 @@ cdef dict _pj_sipuri_to_dict(pjsip_sip_uri *uri):
             parameters[_pj_str_to_str(param.name)] = _pj_str_to_str(param.value)
         param = <pjsip_param *> (<pj_list *> param).next
     param = <pjsip_param *> (<pj_list *> &uri.header_param).next
-
     while param != &uri.header_param:
         if param.value.slen == 0:
             headers[_pj_str_to_str(param.name)] = None
@@ -334,11 +318,9 @@ cdef dict _pj_sipuri_to_dict(pjsip_sip_uri *uri):
         param = <pjsip_param *> (<pj_list *> param).next
     return kwargs
 
-
 cdef SIPURI SIPURI_create(pjsip_sip_uri *uri):
     cdef dict kwargs = _pj_sipuri_to_dict(uri)
     return SIPURI(**kwargs)
-
 
 cdef FrozenSIPURI FrozenSIPURI_create(pjsip_sip_uri *uri):
     cdef dict kwargs = _pj_sipuri_to_dict(uri)
@@ -350,6 +332,6 @@ cdef FrozenSIPURI FrozenSIPURI_create(pjsip_sip_uri *uri):
 # Globals
 #
 
-cdef PJSTR _Credentials_scheme_digest = PJSTR(b"digest")
+cdef PJSTR _Credentials_scheme_digest = PJSTR("digest")
 
 

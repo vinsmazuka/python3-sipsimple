@@ -11,7 +11,7 @@ import random
 from collections import deque
 
 from application.system import makedirs, openfile, unlink
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.configuration.backend import IConfigurationBackend, ConfigurationBackendError
 
@@ -45,15 +45,15 @@ class Line(object):
         return "%s(%r, %r, %r, %r)" % (self.__class__.__name__, self.indentation, self.name, self.separator, self.value)
 
 
-@implementer(IConfigurationBackend)
 class FileBackend(object):
     """
     Implementation of a configuration backend that stores data in a simple
     plain text format.
     """
 
+    implements(IConfigurationBackend)
 
-    escape_characters_re = re.compile(r"""[,"'=: #\\\t\x0b\x0c\n\r]""")
+    escape_characters_re = re.compile(ur"""[,"'=: #\\\t\x0b\x0c\n\r]""")
 
     def __init__(self, filename, encoding='utf-8'):
         """
@@ -72,8 +72,8 @@ class FileBackend(object):
         """
 
         try:
-            file = open(self.filename, 'rb')
-        except IOError as e:
+            file = open(self.filename)
+        except IOError, e:
             if e.errno == errno.ENOENT:
                 return {}
             else:
@@ -82,18 +82,17 @@ class FileBackend(object):
         state_stack = deque()
         state_stack.appendleft(GroupState(-1))
         for lineno, line in enumerate(file, 1):
-            line = line.decode()
             line = self._parse_line(line, lineno)
             if not line.name:
                 continue
             # find the container for this declaration
             while state_stack[0].indentation >= line.indentation:
                 state_stack.popleft()
-            if line.separator == ':':
+            if line.separator == u':':
                 new_group_state = GroupState(line.indentation)
                 state_stack[0].data[line.name] = new_group_state.data
                 state_stack.appendleft(new_group_state)
-            elif line.separator == '=':
+            elif line.separator == u'=':
                 state_stack[0].data[line.name] = line.value
 
         return state_stack[-1].data
@@ -110,7 +109,7 @@ class FileBackend(object):
         try:
             if config_directory:
                 makedirs(config_directory)
-            file = openfile(tmp_filename, 'wb', permissions=0o600)
+            file = openfile(tmp_filename, 'wb', permissions=0600)
             file.write((os.linesep.join(lines)+os.linesep).encode(self.encoding))
             file.close()
             if platform.system() == 'Windows':
@@ -118,7 +117,7 @@ class FileBackend(object):
                 # It seems there is no atomic way to do this on Windows.
                 unlink(self.filename)
             os.rename(tmp_filename, self.filename)
-        except (IOError, OSError) as e:
+        except (IOError, OSError), e:
             raise ConfigurationBackendError("failed to write configuration file: %s" % str(e))
 
     def _parse_line(self, line, lineno):
@@ -127,7 +126,7 @@ class FileBackend(object):
             while line and line[0].isspace():
                 line.popleft()
                 counter += 1
-            if line and line[0] == '#':
+            if line and line[0] == u'#':
                 line.clear()
             return counter
         def token_iterator(line, delimiter=''):
@@ -136,7 +135,7 @@ class FileBackend(object):
                 if quote_char is None and line[0] in delimiter:
                     break
                 char = line.popleft()
-                if char in "'\"":
+                if char in u"'\"":
                     if quote_char is None:
                         quote_char = char
                         continue
@@ -145,17 +144,17 @@ class FileBackend(object):
                         continue
                     else:
                         yield char
-                elif char == '\\':
+                elif char == u'\\':
                     if not line:
                         raise FileParserError("unexpected `\\' at end of line %d" % lineno)
                     char = line.popleft()
                     if char == 'n':
-                        yield '\n'
+                        yield u'\n'
                     elif char == 'r':
-                        yield '\r'
+                        yield u'\r'
                     else:
                         yield char
-                elif quote_char is None and char == '#':
+                elif quote_char is None and char == u'#':
                     line.clear()
                     break
                 elif quote_char is None and char.isspace():
@@ -165,13 +164,13 @@ class FileBackend(object):
             if quote_char is not None:
                 raise FileParserError("missing ending quote at line %d" % lineno)
 
-        line = deque(line.rstrip())
+        line = deque(line.rstrip().decode(self.encoding))
         indentation = advance_to_next_token(line)
         if not line:
             return Line(indentation, None, None, None)
-        name = ''.join(token_iterator(line, delimiter=':='))
+        name = u''.join(token_iterator(line, delimiter=u':='))
         advance_to_next_token(line)
-        if not line or line[0] not in ':=':
+        if not line or line[0] not in u':=':
             raise FileParserError("expected one of `:' or `=' at line %d" % lineno)
         if not name:
             raise FileParserError("missing setting/section name at line %d" % lineno)
@@ -179,15 +178,15 @@ class FileBackend(object):
         advance_to_next_token(line)
         if not line:
             return Line(indentation, name, separator, None)
-        elif separator == ':':
+        elif separator == u':':
             raise FileParserError("unexpected characters after `:' at line %d" % lineno)
         value = None
         value_list = None
         while line:
-            value = ''.join(token_iterator(line, delimiter=','))
+            value = u''.join(token_iterator(line, delimiter=u','))
             advance_to_next_token(line)
             if line:
-                if line[0] == ',':
+                if line[0] == u',':
                     line.popleft()
                     advance_to_next_token(line)
                     if value_list is None:
@@ -202,30 +201,30 @@ class FileBackend(object):
     def _build_group(self, group, indentation):
         setting_lines = []
         group_lines = []
-        indent_spaces = ' '*4*indentation
-        for name, data in sorted(group.items()):
+        indent_spaces = u' '*4*indentation
+        for name, data in sorted(group.iteritems()):
             if data is None:
-                setting_lines.append('%s%s =' % (indent_spaces, self._escape(name)))
+                setting_lines.append(u'%s%s =' % (indent_spaces, self._escape(name)))
             elif type(data) is dict:
-                group_lines.append('%s%s:' % (indent_spaces, self._escape(name)))
+                group_lines.append(u'%s%s:' % (indent_spaces, self._escape(name)))
                 group_lines.extend(self._build_group(data, indentation+1))
-                group_lines.append('')
+                group_lines.append(u'')
             elif type(data) is list:
-                list_value = ', '.join(self._escape(item) for item in data)
+                list_value = u', '.join(self._escape(item) for item in data)
                 if len(data) == 1:
-                    list_value += ','
-                setting_lines.append('%s%s = %s' % (indent_spaces, self._escape(name), list_value))
-            elif type(data) is str:
-                setting_lines.append('%s%s = %s' % (indent_spaces, self._escape(name), self._escape(data)))
+                    list_value += u','
+                setting_lines.append(u'%s%s = %s' % (indent_spaces, self._escape(name), list_value))
+            elif type(data) is unicode:
+                setting_lines.append(u'%s%s = %s' % (indent_spaces, self._escape(name), self._escape(data)))
             else:
                 raise FileBuilderError("expected unicode, dict or list object, got %s" % type(data).__name__)
         return setting_lines + group_lines
 
     def _escape(self, value):
-        if value == '':
-            return '""'
+        if value == u'':
+            return u'""'
         elif self.escape_characters_re.search(value):
-            return '"%s"' % value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+            return u'"%s"' % value.replace(u'\\', u'\\\\').replace(u'"', u'\\"').replace(u'\n', u'\\n').replace(u'\r', u'\\r')
         else:
             return value
 

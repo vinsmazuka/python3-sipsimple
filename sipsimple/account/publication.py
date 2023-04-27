@@ -12,10 +12,9 @@ from time import time
 from application.notification import IObserver, NotificationCenter, NotificationData
 from application.python import Null, limit
 from application.python.types import MarkerType
-from application.system import host as Host
 from eventlib import coros, proc
 from twisted.internet import reactor
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core import FromHeader, Publication, PublicationETagError, RouteHeader, SIPURI, SIPCoreError
 from sipsimple.configuration.settings import SIPSimpleSettings
@@ -30,7 +29,7 @@ from sipsimple.threading.green import Command, run_in_green_thread
 Command.register_defaults('publish', refresh_interval=None)
 
 
-class SameState(metaclass=MarkerType): pass
+class SameState: __metaclass__ = MarkerType
 
 
 class SIPPublicationDidFail(Exception):
@@ -61,11 +60,12 @@ class PublisherNickname(dict):
         raise AttributeError('cannot delete attribute')
 
 
-@implementer(IObserver)
-class Publisher(object, metaclass=ABCMeta):
+class Publisher(object):
+    __metaclass__ = ABCMeta
     __nickname__  = PublisherNickname()
     __transports__ = frozenset(['tls', 'tcp', 'udp'])
 
+    implements(IObserver)
 
     def __init__(self, account):
         self.account = account
@@ -173,7 +173,6 @@ class Publisher(object, metaclass=ABCMeta):
             handler = getattr(self, '_CH_%s' % command.name)
             handler(command)
 
-    @run_in_green_thread
     def _CH_publish(self, command):
         if command.state is None or self._publication is None and command.state is SameState:
             command.signal()
@@ -196,20 +195,16 @@ class Publisher(object, metaclass=ABCMeta):
             notification_center.post_notification(self.__class__.__name__ + 'WillRefresh', sender=self, data=NotificationData(state=command.state))
 
         try:
-            if Host.default_ip is None:
-                raise PublicationError('No IP address', retry_after=60)
-
             # Lookup routes
             valid_transports = self.__transports__.intersection(settings.sip.transport_list)
             if self.account.sip.outbound_proxy is not None and self.account.sip.outbound_proxy.transport in valid_transports:
                 uri = SIPURI(host=self.account.sip.outbound_proxy.host, port=self.account.sip.outbound_proxy.port, parameters={'transport': self.account.sip.outbound_proxy.transport})
             else:
                 uri = SIPURI(host=self.account.id.domain)
-
             lookup = DNSLookup()
             try:
-                routes = lookup.lookup_sip_proxy(uri, valid_transports, tls_name=self.account.sip.tls_name).wait()
-            except DNSLookupError as e:
+                routes = lookup.lookup_sip_proxy(uri, valid_transports).wait()
+            except DNSLookupError, e:
                 retry_after = random.uniform(self._dns_wait, 2*self._dns_wait)
                 self._dns_wait = limit(2*self._dns_wait, max=30)
                 raise PublicationError('DNS lookup failed: %s' % e, retry_after=retry_after)
@@ -221,15 +216,12 @@ class Publisher(object, metaclass=ABCMeta):
             # Publish by trying each route in turn
             publish_timeout = time() + 30
             for route in routes:
-                if Host.default_ip is None:
-                    raise PublicationError('No IP address', retry_after=60)
-
                 remaining_time = publish_timeout-time()
                 if remaining_time > 0:
                     try:
                         try:
                             self._publication.publish(body, RouteHeader(route.uri), timeout=limit(remaining_time, min=1, max=10))
-                        except (ValueError, AttributeError) as e:  # this happens for an initial PUBLISH with body=None
+                        except ValueError as e:  # this happens for an initial PUBLISH with body=None
                             raise PublicationError(str(e), retry_after=0)
                         except PublicationETagError:
                             state = self.state # access self.state only once to avoid race conditions
@@ -247,8 +239,8 @@ class Publisher(object, metaclass=ABCMeta):
                             if notification.name == 'SIPPublicationDidSucceed':
                                 break
                             if notification.name == 'SIPPublicationDidEnd':
-                                raise PublicationError('Publication expired', retry_after=random.uniform(60, 120))  # publication expired while we were trying to re-publish
-                    except SIPPublicationDidFail as e:
+                                raise PublicationError('Publication expired', retry_after=0)  # publication expired while we were trying to re-publish
+                    except SIPPublicationDidFail, e:
                         if e.data.code == 407:
                             # Authentication failed, so retry the publication in some time
                             raise PublicationError('Authentication failed', retry_after=random.uniform(60, 120))
@@ -276,16 +268,16 @@ class Publisher(object, metaclass=ABCMeta):
                 retry_after = random.uniform(self._publish_wait, 2*self._publish_wait)
                 self._publish_wait = limit(self._publish_wait*2, max=30)
                 raise PublicationError('No more routes to try', retry_after=retry_after)
-        except PublicationError as e:
+        except PublicationError, e:
             self.publishing = False
-            notification_center.discard_observer(self, sender=self._publication)
-            def publish(e):
+            notification_center.remove_observer(self, sender=self._publication)
+            def publish():
                 if self.active:
                     self._command_channel.send(Command('publish', event=command.event, state=self.state, refresh_interval=e.refresh_interval))
                 else:
                     command.signal()
                 self._publication_timer = None
-            self._publication_timer = reactor.callLater(e.retry_after, publish, e)
+            self._publication_timer = reactor.callLater(e.retry_after, publish)
             self._publication = None
             notification_center.post_notification(self.__nickname__ + 'PublicationDidFail', sender=self, data=NotificationData(reason=e.error))
         else:

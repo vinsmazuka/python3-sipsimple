@@ -246,15 +246,15 @@ class DialogInfo(XMLListRootElement):
 
     def __getitem__(self, key):
         if key is IterateIDs:
-            return iter(list(self._xmlid_map[Dialog].keys()))
+            return self._xmlid_map[Dialog].iterkeys()
         elif key is IterateItems:
-            return iter(list(self._xmlid_map[Dialog].values()))
+            return self._xmlid_map[Dialog].itervalues()
         else:
             return self._xmlid_map[Dialog][key]
 
     def __delitem__(self, key):
         if key is All:
-            for item in list(self._xmlid_map[Dialog].values()):
+            for item in self._xmlid_map[Dialog].values():
                 self.remove(item)
         else:
             self.remove(self._xmlid_map[Dialog][key])

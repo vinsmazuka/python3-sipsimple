@@ -7,8 +7,8 @@ __all__ = ['Boolean', 'DateTime', 'Byte', 'UnsignedByte', 'Short', 'UnsignedShor
 
 
 import re
-import urllib.request, urllib.parse, urllib.error
-import urllib.parse
+import urllib
+import urlparse
 
 from sipsimple.util import ISOTimestamp
 
@@ -32,7 +32,7 @@ class Boolean(int):
             raise ValueError("Invalid boolean string representation: %s" % value)
 
     def __xmlbuild__(self):
-        return 'true' if self else 'false'
+        return u'true' if self else u'false'
 
 
 class DateTime(ISOTimestamp):
@@ -71,65 +71,65 @@ class UnsignedShort(int):
         return instance
 
 
-class Int(int):
+class Int(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if not (-2147483648 <= instance <= 2147483647):
             raise ValueError("integer number must be a signed 32bit value")
         return instance
 
 
-class UnsignedInt(int):
+class UnsignedInt(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if not (0 <= instance <= 4294967295):
             raise ValueError("integer number must be an unsigned 32bit value")
         return instance
 
 
-class Long(int):
+class Long(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if not (-9223372036854775808 <= instance <= 9223372036854775807):
             raise ValueError("integer number must be a signed 64bit value")
         return instance
 
 
-class UnsignedLong(int):
+class UnsignedLong(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if not (0 <= instance <= 18446744073709551615):
             raise ValueError("integer number must be an unsigned 64bit value")
         return instance
 
 
-class PositiveInteger(int):
+class PositiveInteger(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if instance <= 0:
             raise ValueError("integer number must be a positive value")
         return instance
 
 
-class NegativeInteger(int):
+class NegativeInteger(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if instance >= 0:
             raise ValueError("integer number must be a negative value")
         return instance
 
 
-class NonNegativeInteger(int):
+class NonNegativeInteger(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if instance < 0:
             raise ValueError("integer number must be a non-negative value")
         return instance
 
 
-class NonPositiveInteger(int):
+class NonPositiveInteger(long):
     def __new__(cls, value):
-        instance = int.__new__(cls, value)
+        instance = long.__new__(cls, value)
         if instance > 0:
             raise ValueError("integer number must be a non-positive value")
         return instance
@@ -144,16 +144,13 @@ class ID(str):
         return str.__new__(cls, value)
 
 
-class AnyURI(str):
+class AnyURI(unicode):
     @classmethod
     def __xmlparse__(cls, value):
-        return cls.__new__(cls, urllib.parse.unquote(value))
+        return cls.__new__(cls, urllib.unquote(value).decode('utf-8'))
 
     def __xmlbuild__(self):
-        return urllib.parse.quote(self.encode('utf-8'))
-        
-    def __sqlrepr__(self, db):
-        return """'%s'""" % str(self)
+        return urllib.quote(self.encode('utf-8'))
 
 
 class SIPURI(AnyURI):
@@ -161,7 +158,7 @@ class SIPURI(AnyURI):
 
     def __new__(cls, value):
         instance = AnyURI.__new__(cls, value)
-        uri = urllib.parse.urlparse(instance)
+        uri = urlparse.urlparse(instance)
 
         if uri.scheme not in ('sip', 'sips'):
             raise ValueError("illegal scheme for SIP URI: %s" % uri.scheme)
@@ -187,7 +184,7 @@ class SIPURI(AnyURI):
             except ValueError:
                 raise ValueError("illegal SIP URI headers: %s" % uri.query)
             else:
-                for name, value in list(instance.headers.items()):
+                for name, value in instance.headers.iteritems():
                     if not name or not value:
                         raise ValueError("illegal URI header: %s=%s" % (name, value))
         else:
@@ -201,7 +198,7 @@ class XCAPURI(AnyURI):
 
     def __new__(cls, value):
         instance = AnyURI.__new__(cls, value)
-        uri = urllib.parse.urlparse(instance)
+        uri = urlparse.urlparse(instance)
 
         if uri.scheme not in ('http', 'https', ''):
             raise ValueError("illegal scheme for XCAP URI: %s" % uri.scheme)
@@ -220,7 +217,7 @@ class XCAPURI(AnyURI):
             except ValueError:
                 raise ValueError("illegal XCAP URI query string: %s" % uri.query)
             else:
-                for name, value in list(instance.query.items()):
+                for name, value in instance.query.iteritems():
                     if not name or not value:
                         raise ValueError("illegal XCAP URI query parameter: %s=%s" % (name, value))
         else:

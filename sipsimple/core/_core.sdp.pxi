@@ -20,11 +20,11 @@ cdef object BaseSDPSession_richcmp(object self, object other, int op) with gil:
     else:
         return not eq
 
-cdef pjmedia_sdp_session* _parse_sdp_session(object sdp):
+cdef pjmedia_sdp_session* _parse_sdp_session(str sdp):
     cdef int status
     cdef pjmedia_sdp_session *sdp_session
 
-    status = pjmedia_sdp_parse(_get_ua()._pjsip_endpoint._pool, _str_as_str(sdp), _str_as_size(sdp), &sdp_session)
+    status = pjmedia_sdp_parse(_get_ua()._pjsip_endpoint._pool, PyString_AsString(sdp), PyString_Size(sdp), &sdp_session)
     if status != 0:
         raise PJSIPError("failed to parse SDP", status)
     return sdp_session
@@ -42,7 +42,7 @@ cdef class BaseSDPSession:
         cdef int buf_len
         buf_len = pjmedia_sdp_print(self.get_sdp_session(), cbuf, sizeof(cbuf))
         if buf_len > -1:
-            return _pj_buf_len_to_str(cbuf, buf_len).decode()
+            return PyString_FromStringAndSize(cbuf, buf_len)
         return ''
 
     def __richcmp__(self, other, op):
@@ -66,11 +66,11 @@ cdef class BaseSDPSession:
     property has_ice_attributes:
 
         def __get__(self):
-            return set([attr.name for attr in self.attributes]).issuperset([b'ice-pwd', b'ice-ufrag'])
+            return set([attr.name for attr in self.attributes]).issuperset(['ice-pwd', 'ice-ufrag'])
 
 cdef class SDPSession(BaseSDPSession):
-    def __init__(self, object address not None, object id=None, object version=None, object user not None=b"-", object net_type not None=b"IN", object address_type not None=b"IP4",
-                 object name not None=b" ", SDPConnection connection=None, unsigned long start_time=0, unsigned long stop_time=0, list attributes=None, list bandwidth_info=None, list media=None):
+    def __init__(self, str address not None, object id=None, object version=None, str user not None="-", str net_type not None="IN", str address_type not None="IP4",
+                 str name not None=" ", SDPConnection connection=None, unsigned long start_time=0, unsigned long stop_time=0, list attributes=None, list bandwidth_info=None, list media=None):
         cdef unsigned int version_id = 2208988800UL
         cdef pj_time_val tv
 
@@ -101,7 +101,7 @@ cdef class SDPSession(BaseSDPSession):
                    connection, sdp_session.start_time, sdp_session.stop_time, attributes, bandwidth_info, media)
 
     @classmethod
-    def parse(cls, object sdp):
+    def parse(cls, str sdp):
         cdef pjmedia_sdp_session *sdp_session
         sdp_session = _parse_sdp_session(sdp)
         return SDPSession_create(sdp_session)
@@ -111,7 +111,7 @@ cdef class SDPSession(BaseSDPSession):
         def __get__(self):
             return self._address
 
-        def __set__(self, object address not None):
+        def __set__(self, str address not None):
             _str_to_pj_str(address, &self._sdp_session.origin.addr)
             self._address = address
 
@@ -136,7 +136,7 @@ cdef class SDPSession(BaseSDPSession):
         def __get__(self):
             return self._user
 
-        def __set__(self, object user not None):
+        def __set__(self, str user not None):
             _str_to_pj_str(user, &self._sdp_session.origin.user)
             self._user = user
 
@@ -145,7 +145,7 @@ cdef class SDPSession(BaseSDPSession):
         def __get__(self):
             return self._net_type
 
-        def __set__(self, object net_type not None):
+        def __set__(self, str net_type not None):
             _str_to_pj_str(net_type, &self._sdp_session.origin.net_type)
             self._net_type = net_type
 
@@ -154,7 +154,7 @@ cdef class SDPSession(BaseSDPSession):
         def __get__(self):
             return self._address_type
 
-        def __set__(self, object address_type not None):
+        def __set__(self, str address_type not None):
             _str_to_pj_str(address_type, &self._sdp_session.origin.addr_type)
             self._address_type = address_type
 
@@ -163,7 +163,7 @@ cdef class SDPSession(BaseSDPSession):
         def __get__(self):
             return self._name
 
-        def __set__(self, object name not None):
+        def __set__(self, str name not None):
             _str_to_pj_str(name, &self._sdp_session.name)
             self._name = name
 
@@ -275,7 +275,7 @@ cdef class SDPSession(BaseSDPSession):
                 old_media._update(media)
 
 cdef class FrozenSDPSession(BaseSDPSession):
-    def __init__(self, object address not None, object id=None, object version=None, object user not None=b"-", object net_type not None=b"IN", object address_type not None=b"IP4", object name not None=b" ",
+    def __init__(self, str address not None, object id=None, object version=None, str user not None="-", str net_type not None="IN", str address_type not None="IP4", str name not None=" ",
                  FrozenSDPConnection connection=None, unsigned long start_time=0, unsigned long stop_time=0, frozenlist attributes not None=frozenlist(), frozenlist bandwidth_info not None=frozenlist(),
                  frozenlist media not None=frozenlist()):
         cdef unsigned int version_id = 2208988800UL
@@ -341,7 +341,7 @@ cdef class FrozenSDPSession(BaseSDPSession):
                    connection, sdp_session.start_time, sdp_session.stop_time, attributes, bandwidth_info, media)
 
     @classmethod
-    def parse(cls, object sdp):
+    def parse(cls, str sdp):
         cdef pjmedia_sdp_session *sdp_session
         sdp_session = _parse_sdp_session(sdp)
         return FrozenSDPSession_create(sdp_session)
@@ -433,19 +433,19 @@ cdef class BaseSDPMediaStream:
 
         def __get__(self):
             for attribute in self.attributes:
-                if attribute.name in (b"sendrecv", b"sendonly", b"recvonly", b"inactive"):
+                if attribute.name in ("sendrecv", "sendonly", "recvonly", "inactive"):
                     return attribute.name
-            return b"sendrecv"
+            return "sendrecv"
 
     property has_ice_attributes:
 
         def __get__(self):
-            return set([attr.name for attr in self.attributes]).issuperset([b'ice-pwd', b'ice-ufrag'])
+            return set([attr.name for attr in self.attributes]).issuperset(['ice-pwd', 'ice-ufrag'])
 
     property has_ice_candidates:
 
         def __get__(self):
-            return b'candidate' in self.attributes
+            return 'candidate' in self.attributes
 
     cdef pjmedia_sdp_media* get_sdp_media(self):
         self._sdp_media.attr_count = len(self.attributes)
@@ -457,7 +457,7 @@ cdef class BaseSDPMediaStream:
         return &self._sdp_media
 
 cdef class SDPMediaStream(BaseSDPMediaStream):
-    def __init__(self, object media not None, int port, object transport not None, int port_count=1, list formats=None,
+    def __init__(self, str media not None, int port, str transport not None, int port_count=1, list formats=None,
                  SDPConnection connection=None, list attributes=None, list bandwidth_info=None):
         self.media = media
         self.port = port
@@ -481,7 +481,7 @@ cdef class SDPMediaStream(BaseSDPMediaStream):
         def __get__(self):
             return self._media
 
-        def __set__(self, object media not None):
+        def __set__(self, str media not None):
             _str_to_pj_str(media, &self._sdp_media.desc.media)
             self._media = media
 
@@ -498,7 +498,7 @@ cdef class SDPMediaStream(BaseSDPMediaStream):
         def __get__(self):
             return self._transport
 
-        def __set__(self, object transport not None):
+        def __set__(self, str transport not None):
             _str_to_pj_str(transport, &self._sdp_media.desc.transport)
             self._transport = transport
 
@@ -554,9 +554,9 @@ cdef class SDPMediaStream(BaseSDPMediaStream):
             if not isinstance(attributes, SDPAttributeList):
                 attributes = SDPAttributeList(attributes)
             self._attributes = attributes
-            if self._media in (b"audio", b"video"):
+            if self._media in ("audio", "video"):
                 rtp_mappings = self.rtp_mappings.copy()
-                rtpmap_lines = '\n'.join([attr.value.decode() for attr in attributes if attr.name==b'rtpmap']) # iterators are not supported -Dan
+                rtpmap_lines = '\n'.join([attr.value for attr in attributes if attr.name=='rtpmap']) # iterators are not supported -Dan
                 rtpmap_codecs = dict([(int(type), MediaCodec(name, rate)) for type, name, rate in self.rtpmap_re.findall(rtpmap_lines)])
                 rtp_mappings.update(rtpmap_codecs)
                 self._codec_list = [rtp_mappings.get(int(format), MediaCodec('Unknown', 0)) for format in self.formats]
@@ -607,7 +607,7 @@ cdef class SDPMediaStream(BaseSDPMediaStream):
                     self._bandwidth_info[index] = info
 
 cdef class FrozenSDPMediaStream(BaseSDPMediaStream):
-    def __init__(self, object media not None, int port, object transport not None, int port_count=1, frozenlist formats not None=frozenlist(),
+    def __init__(self, str media not None, int port, str transport not None, int port_count=1, frozenlist formats not None=frozenlist(),
                  FrozenSDPConnection connection=None, frozenlist attributes not None=frozenlist(), frozenlist bandwidth_info not None=frozenlist()):
         if not self.initialized:
             if len(formats) > PJMEDIA_MAX_SDP_FMT:
@@ -640,9 +640,9 @@ cdef class FrozenSDPMediaStream(BaseSDPMediaStream):
             else:
                 self._sdp_media.conn = connection.get_sdp_connection()
             self.attributes = FrozenSDPAttributeList(attributes) if not isinstance(attributes, FrozenSDPAttributeList) else attributes
-            if self.media in (b"audio", b"video"):
+            if self.media in ("audio", "video"):
                 rtp_mappings = self.rtp_mappings.copy()
-                rtpmap_lines = '\n'.join([attr.value.decode() for attr in attributes if attr.name==b'rtpmap']) # iterators are not supported -Dan
+                rtpmap_lines = '\n'.join([attr.value for attr in attributes if attr.name=='rtpmap']) # iterators are not supported -Dan
                 rtpmap_codecs = dict([(int(type), MediaCodec(name, rate)) for type, name, rate in self.rtpmap_re.findall(rtpmap_lines)])
                 rtp_mappings.update(rtpmap_codecs)
                 self.codec_list = frozenlist([rtp_mappings.get(int(format) if format.isdigit() else None, MediaCodec('Unknown', 0)) for format in self.formats])
@@ -697,7 +697,7 @@ cdef class BaseSDPConnection:
         return &self._sdp_connection
 
 cdef class SDPConnection(BaseSDPConnection):
-    def __init__(self, object address not None, object net_type not None=b"IN", object address_type not None=b"IP4"):
+    def __init__(self, str address not None, str net_type not None="IN", str address_type not None="IP4"):
         self.address = address
         self.net_type = net_type
         self.address_type = address_type
@@ -711,7 +711,7 @@ cdef class SDPConnection(BaseSDPConnection):
         def __get__(self):
             return self._address
 
-        def __set__(self, object address not None):
+        def __set__(self, str address not None):
             _str_to_pj_str(address, &self._sdp_connection.addr)
             self._address = address
 
@@ -720,7 +720,7 @@ cdef class SDPConnection(BaseSDPConnection):
         def __get__(self):
             return self._net_type
 
-        def __set__(self, object net_type not None):
+        def __set__(self, str net_type not None):
             _str_to_pj_str(net_type, &self._sdp_connection.net_type)
             self._net_type = net_type
 
@@ -729,12 +729,12 @@ cdef class SDPConnection(BaseSDPConnection):
         def __get__(self):
             return self._address_type
 
-        def __set__(self, object address_type not None):
+        def __set__(self, str address_type not None):
             _str_to_pj_str(address_type, &self._sdp_connection.addr_type)
             self._address_type = address_type
 
 cdef class FrozenSDPConnection(BaseSDPConnection):
-    def __init__(self, object address not None, object net_type not None=b"IN", object address_type not None=b"IP4"):
+    def __init__(self, str address not None, str net_type not None="IN", str address_type not None="IP4"):
         if not self.initialized:
             _str_to_pj_str(address, &self._sdp_connection.addr)
             _str_to_pj_str(net_type, &self._sdp_connection.net_type)
@@ -819,7 +819,7 @@ cdef class BaseSDPAttribute:
         return &self._sdp_attribute
 
 cdef class SDPAttribute(BaseSDPAttribute):
-    def __init__(self, object name not None, object value not None):
+    def __init__(self, str name not None, str value not None):
         self.name = name
         self.value = value
 
@@ -832,8 +832,7 @@ cdef class SDPAttribute(BaseSDPAttribute):
         def __get__(self):
             return self._name
 
-        def __set__(self, object name not None):
-            #print('SDP attribute name %s %s' % (name, type(name)))
+        def __set__(self, str name not None):
             _str_to_pj_str(name, &self._sdp_attribute.name)
             self._name = name
 
@@ -842,13 +841,12 @@ cdef class SDPAttribute(BaseSDPAttribute):
         def __get__(self):
             return self._value
 
-        def __set__(self, object value not None):
-            #print('SDP attribute value %s %s' % (value, type(value)))
+        def __set__(self, str value not None):
             _str_to_pj_str(value, &self._sdp_attribute.value)
             self._value = value
 
 cdef class FrozenSDPAttribute(BaseSDPAttribute):
-    def __init__(self, object name not None, object value not None):
+    def __init__(self, str name not None, str value not None):
         if not self.initialized:
             _str_to_pj_str(name, &self._sdp_attribute.name)
             _str_to_pj_str(value, &self._sdp_attribute.value)
@@ -913,7 +911,7 @@ cdef class BaseSDPBandwidthInfo:
         return &self._sdp_bandwidth_info
 
 cdef class SDPBandwidthInfo(BaseSDPBandwidthInfo):
-    def __init__(self, object modifier not None, object value not None):
+    def __init__(self, str modifier not None, object value not None):
         self.modifier = modifier
         self.value = value
 
@@ -926,7 +924,7 @@ cdef class SDPBandwidthInfo(BaseSDPBandwidthInfo):
         def __get__(self):
             return self._modifier
 
-        def __set__(self, object modifier not None):
+        def __set__(self, str modifier not None):
             _str_to_pj_str(modifier, &self._sdp_bandwidth_info.modifier)
             self._modifier = modifier
 
@@ -940,7 +938,7 @@ cdef class SDPBandwidthInfo(BaseSDPBandwidthInfo):
             self._sdp_bandwidth_info.value = self._value
 
 cdef class FrozenSDPBandwidthInfo(BaseSDPBandwidthInfo):
-    def __init__(self, object modifier not None, object value not None):
+    def __init__(self, str modifier not None, object value not None):
         if not self.initialized:
             _str_to_pj_str(modifier, &self._sdp_bandwidth_info.modifier)
             self.modifier = modifier
@@ -966,15 +964,16 @@ cdef class FrozenSDPBandwidthInfo(BaseSDPBandwidthInfo):
 
 cdef SDPSession SDPSession_create(pjmedia_sdp_session_ptr_const pj_session):
     cdef SDPConnection connection = None
+    cdef int i
     if pj_session.conn != NULL:
         connection = SDPConnection_create(pj_session.conn)
-    return SDPSession(_pj_str_to_bytes(pj_session.origin.addr),
+    return SDPSession(_pj_str_to_str(pj_session.origin.addr),
                        pj_session.origin.id,
                        pj_session.origin.version,
-                       _pj_str_to_bytes(pj_session.origin.user),
-                       _pj_str_to_bytes(pj_session.origin.net_type),
-                       _pj_str_to_bytes(pj_session.origin.addr_type),
-                       _pj_str_to_bytes(pj_session.name),
+                       _pj_str_to_str(pj_session.origin.user),
+                       _pj_str_to_str(pj_session.origin.net_type),
+                       _pj_str_to_str(pj_session.origin.addr_type),
+                       _pj_str_to_str(pj_session.name),
                        connection,
                        pj_session.time.start,
                        pj_session.time.stop,
@@ -984,15 +983,16 @@ cdef SDPSession SDPSession_create(pjmedia_sdp_session_ptr_const pj_session):
 
 cdef FrozenSDPSession FrozenSDPSession_create(pjmedia_sdp_session_ptr_const pj_session):
     cdef FrozenSDPConnection connection = None
+    cdef int i
     if pj_session.conn != NULL:
         connection = FrozenSDPConnection_create(pj_session.conn)
-    return FrozenSDPSession(_pj_str_to_bytes(pj_session.origin.addr),
+    return FrozenSDPSession(_pj_str_to_str(pj_session.origin.addr),
                             pj_session.origin.id,
                             pj_session.origin.version,
-                            _pj_str_to_bytes(pj_session.origin.user),
-                            _pj_str_to_bytes(pj_session.origin.net_type),
-                            _pj_str_to_bytes(pj_session.origin.addr_type),
-                            _pj_str_to_bytes(pj_session.name),
+                            _pj_str_to_str(pj_session.origin.user),
+                            _pj_str_to_str(pj_session.origin.net_type),
+                            _pj_str_to_str(pj_session.origin.addr_type),
+                            _pj_str_to_str(pj_session.name),
                             connection,
                             pj_session.time.start,
                             pj_session.time.stop,
@@ -1002,49 +1002,51 @@ cdef FrozenSDPSession FrozenSDPSession_create(pjmedia_sdp_session_ptr_const pj_s
 
 cdef SDPMediaStream SDPMediaStream_create(pjmedia_sdp_media *pj_media):
     cdef SDPConnection connection = None
+    cdef int i
     if pj_media.conn != NULL:
         connection = SDPConnection_create(pj_media.conn)
-    return SDPMediaStream(_pj_str_to_bytes(pj_media.desc.media),
+    return SDPMediaStream(_pj_str_to_str(pj_media.desc.media),
                           pj_media.desc.port,
-                          _pj_str_to_bytes(pj_media.desc.transport),
+                          _pj_str_to_str(pj_media.desc.transport),
                           pj_media.desc.port_count,
-                          [_pj_str_to_bytes(pj_media.desc.fmt[i]) for i in range(pj_media.desc.fmt_count)],
+                          [_pj_str_to_str(pj_media.desc.fmt[i]) for i in range(pj_media.desc.fmt_count)],
                           connection,
                           [SDPAttribute_create(pj_media.attr[i]) for i in range(pj_media.attr_count)],
                           [SDPBandwidthInfo_create(pj_media.bandw[i]) for i in range(pj_media.bandw_count)])
 
 cdef FrozenSDPMediaStream FrozenSDPMediaStream_create(pjmedia_sdp_media *pj_media):
     cdef FrozenSDPConnection connection = None
+    cdef int i
     if pj_media.conn != NULL:
         connection = FrozenSDPConnection_create(pj_media.conn)
-    return FrozenSDPMediaStream(_pj_str_to_bytes(pj_media.desc.media),
+    return FrozenSDPMediaStream(_pj_str_to_str(pj_media.desc.media),
                           pj_media.desc.port,
-                          _pj_str_to_bytes(pj_media.desc.transport),
+                          _pj_str_to_str(pj_media.desc.transport),
                           pj_media.desc.port_count,
-                          frozenlist([_pj_str_to_bytes(pj_media.desc.fmt[i]) for i in range(pj_media.desc.fmt_count)]),
+                          frozenlist([_pj_str_to_str(pj_media.desc.fmt[i]) for i in range(pj_media.desc.fmt_count)]),
                           connection,
                           frozenlist([FrozenSDPAttribute_create(pj_media.attr[i]) for i in range(pj_media.attr_count)]),
                           frozenlist([FrozenSDPBandwidthInfo_create(pj_media.bandw[i]) for i in range(pj_media.bandw_count)]))
 
 cdef SDPConnection SDPConnection_create(pjmedia_sdp_conn *pj_conn):
-    return SDPConnection(_pj_str_to_bytes(pj_conn.addr), _pj_str_to_bytes(pj_conn.net_type),
-                          _pj_str_to_bytes(pj_conn.addr_type))
+    return SDPConnection(_pj_str_to_str(pj_conn.addr), _pj_str_to_str(pj_conn.net_type),
+                          _pj_str_to_str(pj_conn.addr_type))
 
 cdef FrozenSDPConnection FrozenSDPConnection_create(pjmedia_sdp_conn *pj_conn):
-    return FrozenSDPConnection(_pj_str_to_bytes(pj_conn.addr), _pj_str_to_bytes(pj_conn.net_type),
-                               _pj_str_to_bytes(pj_conn.addr_type))
+    return FrozenSDPConnection(_pj_str_to_str(pj_conn.addr), _pj_str_to_str(pj_conn.net_type),
+                               _pj_str_to_str(pj_conn.addr_type))
 
 cdef SDPAttribute SDPAttribute_create(pjmedia_sdp_attr *pj_attr):
-    return SDPAttribute(_pj_str_to_bytes(pj_attr.name), _pj_str_to_bytes(pj_attr.value))
+    return SDPAttribute(_pj_str_to_str(pj_attr.name), _pj_str_to_str(pj_attr.value))
 
 cdef FrozenSDPAttribute FrozenSDPAttribute_create(pjmedia_sdp_attr *pj_attr):
-    return FrozenSDPAttribute(_pj_str_to_bytes(pj_attr.name), _pj_str_to_bytes(pj_attr.value))
+    return FrozenSDPAttribute(_pj_str_to_str(pj_attr.name), _pj_str_to_str(pj_attr.value))
 
 cdef SDPBandwidthInfo SDPBandwidthInfo_create(pjmedia_sdp_bandw *pj_bandw):
-    return SDPBandwidthInfo(_pj_str_to_bytes(pj_bandw.modifier), int(pj_bandw.value))
+    return SDPBandwidthInfo(_pj_str_to_str(pj_bandw.modifier), int(pj_bandw.value))
 
 cdef FrozenSDPBandwidthInfo FrozenSDPBandwidthInfo_create(pjmedia_sdp_bandw *pj_bandw):
-    return FrozenSDPBandwidthInfo(_pj_str_to_bytes(pj_bandw.modifier), int(pj_bandw.value))
+    return FrozenSDPBandwidthInfo(_pj_str_to_str(pj_bandw.modifier), int(pj_bandw.value))
 
 
 # SDP negotiator
@@ -1115,7 +1117,7 @@ cdef class SDPNegotiator:
         def __get__(self):
             if self._neg == NULL:
                 return None
-            return _buf_to_str(pjmedia_sdp_neg_state_str(pjmedia_sdp_neg_get_state(self._neg)))
+            return PyString_FromString(pjmedia_sdp_neg_state_str(pjmedia_sdp_neg_get_state(self._neg)))
 
     property active_local:
 

@@ -10,10 +10,9 @@ from time import time
 
 from application.notification import IObserver, NotificationCenter, NotificationData
 from application.python import Null, limit
-from application.system import host as Host
 from eventlib import coros, proc
 from twisted.internet import reactor
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core import ContactHeader, FromHeader, Header, RouteHeader, SIPURI, Subscription, ToHeader, SIPCoreError, NoGRUU
 from sipsimple.configuration.settings import SIPSimpleSettings
@@ -57,11 +56,12 @@ class SubscriberNickname(dict):
         raise AttributeError('cannot delete attribute')
 
 
-@implementer(IObserver)
-class Subscriber(object, metaclass=ABCMeta):
+class Subscriber(object):
+    __metaclass__  = ABCMeta
     __nickname__   = SubscriberNickname()
     __transports__ = frozenset(['tls', 'tcp', 'udp'])
 
+    implements(IObserver)
 
     def __init__(self, account):
         self.account = account
@@ -181,9 +181,6 @@ class Subscriber(object, metaclass=ABCMeta):
         valid_transports = self.__transports__.intersection(settings.sip.transport_list)
 
         try:
-            if Host.default_ip is None:
-                raise SubscriptionError('No IP address', retry_after=60)
-
             # Lookup routes
             if self.account.sip.outbound_proxy is not None and self.account.sip.outbound_proxy.transport in valid_transports:
                 uri = SIPURI(host=self.account.sip.outbound_proxy.host, port=self.account.sip.outbound_proxy.port, parameters={'transport': self.account.sip.outbound_proxy.transport})
@@ -191,11 +188,10 @@ class Subscriber(object, metaclass=ABCMeta):
                 uri = SIPURI(host=self.account.id.domain)
             else:
                 uri = SIPURI(host=subscription_uri.domain)
-
             lookup = DNSLookup()
             try:
-                routes = lookup.lookup_sip_proxy(uri, valid_transports, tls_name=self.account.sip.tls_name).wait()
-            except DNSLookupError as e:
+                routes = lookup.lookup_sip_proxy(uri, valid_transports).wait()
+            except DNSLookupError, e:
                 raise SubscriptionError('DNS lookup failed: %s' % e, retry_after=random.uniform(15, 30))
 
             subscription_uri = SIPURI(user=subscription_uri.username, host=subscription_uri.domain)
@@ -203,9 +199,6 @@ class Subscriber(object, metaclass=ABCMeta):
 
             timeout = time() + 30
             for route in routes:
-                if Host.default_ip is None:
-                    raise SubscriptionError('No IP address', retry_after=60)
-
                 remaining_time = timeout - time()
                 if remaining_time > 0:
                     try:
@@ -215,7 +208,7 @@ class Subscriber(object, metaclass=ABCMeta):
                     subscription = Subscription(subscription_uri, FromHeader(self.account.uri, self.account.display_name),
                                                 ToHeader(subscription_uri),
                                                 ContactHeader(contact_uri),
-                                                self.event.encode(),
+                                                self.event,
                                                 RouteHeader(route.uri),
                                                 credentials=self.account.credentials,
                                                 refresh=refresh_interval)
@@ -231,7 +224,7 @@ class Subscriber(object, metaclass=ABCMeta):
                             notification = self._data_channel.wait()
                             if notification.name == 'SIPSubscriptionDidStart':
                                 break
-                    except SIPSubscriptionDidFail as e:
+                    except SIPSubscriptionDidFail, e:
                         notification_center.remove_observer(self, sender=subscription)
                         self._subscription = None
                         if e.data.code == 407:
@@ -275,7 +268,7 @@ class Subscriber(object, metaclass=ABCMeta):
                 if self.active:
                     self._command_channel.send(Command('subscribe'))
             notification_center.remove_observer(self, sender=self._subscription)
-        except InterruptSubscription as e:
+        except InterruptSubscription, e:
             if not self.subscribed:
                 command.signal(e)
             if self._subscription is not None:
@@ -286,7 +279,7 @@ class Subscriber(object, metaclass=ABCMeta):
                     pass
                 finally:
                     notification_center.post_notification(self.__nickname__ + 'SubscriptionDidEnd', sender=self, data=NotificationData(originator='local'))
-        except TerminateSubscription as e:
+        except TerminateSubscription, e:
             if not self.subscribed:
                 command.signal(e)
             if self._subscription is not None:
@@ -305,12 +298,12 @@ class Subscriber(object, metaclass=ABCMeta):
                 finally:
                     notification_center.remove_observer(self, sender=self._subscription)
                     notification_center.post_notification(self.__nickname__ + 'SubscriptionDidEnd', sender=self, data=NotificationData(originator='local'))
-        except SubscriptionError as e:
-            def subscribe(e):
+        except SubscriptionError, e:
+            def subscribe():
                 if self.active:
                     self._command_channel.send(Command('subscribe', command.event, refresh_interval=e.refresh_interval))
                 self._subscription_timer = None
-            self._subscription_timer = reactor.callLater(e.retry_after, subscribe, e)
+            self._subscription_timer = reactor.callLater(e.retry_after, subscribe)
             notification_center.post_notification(self.__nickname__ + 'SubscriptionDidFail', sender=self)
         finally:
             self.subscribed = False

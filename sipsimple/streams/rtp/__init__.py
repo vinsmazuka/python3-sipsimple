@@ -12,7 +12,7 @@ from abc import ABCMeta, abstractmethod
 from application.notification import IObserver, NotificationCenter, NotificationData, ObserverWeakrefProxy
 from application.python import Null
 from threading import RLock
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.account import BonjourAccount
 from sipsimple.configuration.settings import SIPSimpleSettings
@@ -22,8 +22,8 @@ from sipsimple.streams import IMediaStream, InvalidStreamError, MediaStreamType,
 from sipsimple.threading import run_in_thread
 
 
-@implementer(IObserver)
 class ZRTPStreamOptions(object):
+    implements(IObserver)
 
     def __init__(self, stream):
         self._stream = stream
@@ -89,7 +89,7 @@ class ZRTPStreamOptions(object):
             if rtp_transport is not None:
                 @run_in_thread('file-io')
                 def update_name(rtp_transport, name):
-                    rtp_transport.zrtp_peer_name = name if isinstance(name, bytes) else name.encode()
+                    rtp_transport.zrtp_peer_name = name
                     notification_center = NotificationCenter()
                     notification_center.post_notification('RTPStreamZRTPPeerNameChanged', sender=self._stream, data=NotificationData(name=name))
                 self.__dict__['peer_name'] = name
@@ -144,8 +144,8 @@ class ZRTPStreamOptions(object):
         self.master = None
 
 
-@implementer(IObserver)
 class RTPStreamEncryption(object):
+    implements(IObserver)
 
     def __init__(self, stream):
         self._stream_ref = weakref.ref(stream)  # Keep a weak reference before the stream is initialized to avoid a memory cycle that would delay releasing audio resources
@@ -256,7 +256,7 @@ class RTPStreamEncryption(object):
         self.zrtp.__dict__['sas'] = sas = notification.data.sas
         self.zrtp.__dict__['verified'] = verified = notification.data.verified
         self.zrtp.__dict__['peer_name'] = peer_name = notification.sender.zrtp_peer_name
-        notification.center.post_notification('RTPStreamZRTPReceivedSAS', sender=stream, data=NotificationData(sas=sas.decode(), verified=verified, peer_name=peer_name))
+        notification.center.post_notification('RTPStreamZRTPReceivedSAS', sender=stream, data=NotificationData(sas=sas, verified=verified, peer_name=peer_name))
 
     def _NH_RTPTransportZRTPLog(self, notification):
         stream = self._stream
@@ -286,8 +286,9 @@ class RTPStreamType(ABCMeta, MediaStreamType):
     pass
 
 
-@implementer(IMediaStream, IObserver)
-class RTPStream(object, metaclass=RTPStreamType):
+class RTPStream(object):
+    __metaclass__ = RTPStreamType
+    implements(IMediaStream, IObserver)
 
     type = None
     priority = None
@@ -320,7 +321,7 @@ class RTPStream(object, metaclass=RTPStreamType):
 
     @property
     def codec(self):
-        return self._transport.codec.decode() if (self._transport and self._transport.codec) else None
+        return self._transport.codec if self._transport else None
 
     @property
     def sample_rate(self):
@@ -332,7 +333,7 @@ class RTPStream(object, metaclass=RTPStreamType):
 
     @property
     def local_rtp_address(self):
-        return self._rtp_transport.local_rtp_address.decode() if (self._rtp_transport and self._rtp_transport.local_rtp_address) else None
+        return self._rtp_transport.local_rtp_address if self._rtp_transport else None
 
     @property
     def local_rtp_port(self):
@@ -346,7 +347,7 @@ class RTPStream(object, metaclass=RTPStreamType):
     def remote_rtp_address(self):
         if self._ice_state == "IN_USE":
             return self._rtp_transport.remote_rtp_address if self._rtp_transport else None
-        return self._remote_rtp_address_sdp.decode() if self._remote_rtp_address_sdp else None
+        return self._remote_rtp_address_sdp if self._rtp_transport else None
 
     @property
     def remote_rtp_port(self):
@@ -411,15 +412,14 @@ class RTPStream(object, metaclass=RTPStreamType):
         # TODO: actually validate the SDP
         settings = SIPSimpleSettings()
         remote_stream = remote_sdp.media[stream_index]
-        if remote_stream.media != cls.type.encode():
+        if remote_stream.media != cls.type:
             raise UnknownStreamError
-        if remote_stream.transport not in (b'RTP/AVP', b'RTP/SAVP'):
-            raise InvalidStreamError("expected RTP/AVP or RTP/SAVP transport in %s stream, got %s" % (cls.type, remote_stream.transport.decode()))
+        if remote_stream.transport not in ('RTP/AVP', 'RTP/SAVP'):
+            raise InvalidStreamError("expected RTP/AVP or RTP/SAVP transport in %s stream, got %s" % (cls.type, remote_stream.transport))
         local_encryption_policy = session.account.rtp.encryption.key_negotiation if session.account.rtp.encryption.enabled else None
-        
-        if local_encryption_policy == "sdes_mandatory" and not b'crypto' in remote_stream.attributes:
+        if local_encryption_policy == "sdes_mandatory" and not "crypto" in remote_stream.attributes:
             raise InvalidStreamError("SRTP/SDES is locally mandatory but it's not remotely enabled")
-        if remote_stream.transport == b'RTP/SAVP' and b'crypto' in remote_stream.attributes and local_encryption_policy not in ("opportunistic", "sdes_optional", "sdes_mandatory"):
+        if remote_stream.transport == 'RTP/SAVP' and "crypto" in remote_stream.attributes and local_encryption_policy not in ("opportunistic", "sdes_optional", "sdes_mandatory"):
             raise InvalidStreamError("SRTP/SDES is remotely mandatory but it's not locally enabled")
         account_preferred_codecs = getattr(session.account.rtp, '%s_codec_list' % cls.type)
         general_codecs = getattr(settings.rtp, '%s_codec_list' % cls.type)
@@ -442,10 +442,10 @@ class RTPStream(object, metaclass=RTPStreamType):
                 # ICE attributes could come at the session level or at the media level
                 remote_stream = self._incoming_remote_sdp.media[self._incoming_stream_index]
                 self._try_ice = self.session.account.nat_traversal.use_ice and ((remote_stream.has_ice_attributes or self._incoming_remote_sdp.has_ice_attributes) and remote_stream.has_ice_candidates)
-                if b'zrtp-hash' in remote_stream.attributes:
+                if "zrtp-hash" in remote_stream.attributes:
                     incoming_stream_encryption = 'zrtp'
-                elif b'crypto' in remote_stream.attributes:
-                    incoming_stream_encryption = 'sdes_mandatory' if remote_stream.transport == b'RTP/SAVP' else 'sdes_optional'
+                elif "crypto" in remote_stream.attributes:
+                    incoming_stream_encryption = 'sdes_mandatory' if remote_stream.transport == 'RTP/SAVP' else 'sdes_optional'
                 else:
                     incoming_stream_encryption = None
                 if incoming_stream_encryption is not None and local_encryption_policy == 'opportunistic':
@@ -476,13 +476,12 @@ class RTPStream(object, metaclass=RTPStreamType):
                 old_direction = self._transport.direction
                 if old_direction is None:
                     new_direction = "sendrecv"
-                elif b"send" in old_direction:
+                elif "send" in old_direction:
                     new_direction = ("sendonly" if (self._hold_request == 'hold' or (self._hold_request is None and self.on_hold_by_local)) else "sendrecv")
                 else:
                     new_direction = ("inactive" if (self._hold_request == 'hold' or (self._hold_request is None and self.on_hold_by_local)) else "recvonly")
             else:
                 new_direction = None
-            new_direction = new_direction.encode() if new_direction else None
             return self._transport.get_local_media(remote_sdp, index, new_direction)
 
     # Notifications
@@ -521,7 +520,7 @@ class RTPStream(object, metaclass=RTPStreamType):
                     self._save_remote_sdp_rtp_info(remote_sdp, stream_index)
                 else:
                     transport = self._create_transport(rtp_transport)
-            except SIPCoreError as e:
+            except SIPCoreError, e:
                 self.state = "ENDED"
                 self.notification_center.remove_observer(self, sender=rtp_transport)
                 self.notification_center.post_notification('MediaStreamDidNotInitialize', sender=self, data=NotificationData(reason=e.args[0]))
@@ -579,15 +578,14 @@ class RTPStream(object, metaclass=RTPStreamType):
         if self._stun_servers:
             stun_address, stun_port = self._stun_servers.pop()
             try:
-                stun_address = stun_address.encode() if stun_address else None
                 rtp_transport = RTPTransport(ice_stun_address=stun_address, ice_stun_port=stun_port, **self._rtp_args)
-            except SIPCoreError as e:
+            except SIPCoreError, e:
                 self._try_next_rtp_transport(e.args[0])
             else:
                 self.notification_center.add_observer(self, sender=rtp_transport)
                 try:
                     rtp_transport.set_INIT()
-                except SIPCoreError as e:
+                except SIPCoreError, e:
                     self.notification_center.remove_observer(self, sender=rtp_transport)
                     self._try_next_rtp_transport(e.args[0])
         else:

@@ -1,9 +1,9 @@
 
 """Implements utilities commonly used in various parts of the library"""
 
+from __future__ import absolute_import
 
-
-__all__ = ["All", "Any", "ExponentialTimer", "ISOTimestamp", "MultilingualText", "user_info", "sha1", "execute_once"]
+__all__ = ["All", "Any", "ExponentialTimer", "ISOTimestamp", "MultilingualText", "user_info", "sha1"]
 
 import os
 import platform
@@ -22,12 +22,12 @@ from sipsimple.util._sha1 import sha1
 # Utility classes
 #
 
-class All(object, metaclass=MarkerType):
-    pass
+class All(object):
+    __metaclass__ = MarkerType
 
 
-class Any(object, metaclass=MarkerType):
-    pass
+class Any(object):
+    __metaclass__ = MarkerType
 
 
 class ISOTimestamp(datetime):
@@ -36,7 +36,7 @@ class ISOTimestamp(datetime):
             value = args[0]
             if isinstance(value, cls):
                 return value
-            elif isinstance(value, str):
+            elif isinstance(value, basestring):
                 value = dateutil.parser.parse(value)
                 return cls(value.year, value.month, value.day, value.hour, value.minute, value.second, value.microsecond, value.tzinfo)
             elif isinstance(value, datetime):
@@ -60,12 +60,12 @@ class ISOTimestamp(datetime):
         return cls(datetime.now(tzutc()))
 
 
-class MultilingualText(str):
+class MultilingualText(unicode):
     def __new__(cls, *args, **translations):
         if len(args) > 1:
             raise TypeError("%s.__new__ takes at most 1 positional argument (%d given)" % (cls.__name__, len(args)))
-        default = args[0] if args else translations.get('en', '')
-        obj = str.__new__(cls, default)
+        default = args[0] if args else translations.get('en', u'')
+        obj = unicode.__new__(cls, default)
         obj.translations = translations
         return obj
 
@@ -118,7 +118,9 @@ class ExponentialTimer(object):
 # Utility objects
 #
 
-class UserInfo(object, metaclass=Singleton):
+class UserInfo(object):
+    __metaclass__ = Singleton
+
     def __repr__(self):
         return '<username={0.username!r}, fullname={0.fullname!r}>'.format(self)
 
@@ -129,7 +131,7 @@ class UserInfo(object, metaclass=Singleton):
         else:
             import pwd
             name = pwd.getpwuid(os.getuid()).pw_name
-        return name
+        return name.decode(sys.getfilesystemencoding())
 
     @property
     def fullname(self):
@@ -138,18 +140,9 @@ class UserInfo(object, metaclass=Singleton):
         else:
             import pwd
             name = pwd.getpwuid(os.getuid()).pw_gecos.split(',', 1)[0] or pwd.getpwuid(os.getuid()).pw_name
-        return name
+        return name.decode(sys.getfilesystemencoding())
 
 user_info = UserInfo()
 del UserInfo
-
-
-def execute_once(func):
-    def wrapper(*args, **kwargs):
-        if not wrapper.has_run:
-            wrapper.has_run = True
-            return func(*args, **kwargs)
-    wrapper.has_run = False
-    return wrapper
 
 

@@ -14,7 +14,7 @@ from application.python import Null
 from eventlib import api, coros, proc
 from eventlib.green import select
 from twisted.internet import reactor
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple import log
 from sipsimple.account.bonjour import _bonjour
@@ -117,26 +117,15 @@ class BonjourNeighbourPresence(object):
 
 class BonjourNeighbourRecord(object):
     def __init__(self, service_description, host, txtrecord):
-        self.id = txtrecord.get('instance_id', None).decode()
+        self.id = txtrecord.get('instance_id', None)
         self.name = txtrecord.get('name', '').decode('utf-8') or None
         self.host = re.match(r'^(?P<host>.*?)(\.local)?\.?$', host).group('host')
-        contact = txtrecord.get('contact', service_description.name).decode()
-        self.uri = FrozenSIPURI.parse(contact)
-        state = txtrecord.get('state', txtrecord.get('status', None))  # status is read for legacy (remove later) -Dan
-
-        if state:
-            state = state.decode()
-
-        note = txtrecord.get('note', '') or None
-
-        if note:
-            note = note.decode()
-
-        self.presence = BonjourNeighbourPresence(state, note)
+        self.uri = FrozenSIPURI.parse(txtrecord.get('contact', service_description.name))
+        self.presence = BonjourNeighbourPresence(txtrecord.get('state', txtrecord.get('status', None)), txtrecord.get('note', '').decode('utf-8') or None) # status is read for legacy (remove later) -Dan
 
 
-@implementer(IObserver)
 class BonjourServices(object):
+    implements(IObserver)
 
     def __init__(self, account):
         self.account = account
@@ -210,7 +199,7 @@ class BonjourServices(object):
             self._select_proc.kill(RestartSelect)
             file.close()
             if self._register_timer is None:
-                self._register_timer = reactor.callLater(10, self._command_channel.send, Command('register'))
+                self._register_timer = reactor.callLater(1, self._command_channel.send, Command('register'))
 
     def _browse_cb(self, file, flags, interface_index, error_code, service_name, regtype, reply_domain):
         notification_center = NotificationCenter()
@@ -226,17 +215,17 @@ class BonjourServices(object):
             for f in removed_files:
                 f.close()
             if self._discover_timer is None:
-                self._discover_timer = reactor.callLater(5, self._command_channel.send, Command('discover'))
+                self._discover_timer = reactor.callLater(1, self._command_channel.send, Command('discover'))
             return
         if reply_domain != 'local.':
             return
         if flags & _bonjour.kDNSServiceFlagsAdd:
             try:
-                resolution_file = next((f for f in self._files if isinstance(f, BonjourResolutionFile) and f.discovery_file==file and f.service_description==service_description))
+                resolution_file = (f for f in self._files if isinstance(f, BonjourResolutionFile) and f.discovery_file==file and f.service_description==service_description).next()
             except StopIteration:
                 try:
                     resolution_file = _bonjour.DNSServiceResolve(0, interface_index, service_name, regtype, reply_domain, self._resolve_cb)
-                except _bonjour.BonjourError as e:
+                except _bonjour.BonjourError, e:
                     notification_center.post_notification('BonjourAccountDiscoveryFailure', sender=self.account, data=NotificationData(error=str(e), transport=file.transport))
                 else:
                     resolution_file = BonjourResolutionFile(resolution_file, discovery_file=file, service_description=service_description)
@@ -244,7 +233,7 @@ class BonjourServices(object):
                     self._select_proc.kill(RestartSelect)
         else:
             try:
-                resolution_file = next((f for f in self._files if isinstance(f, BonjourResolutionFile) and f.discovery_file==file and f.service_description==service_description))
+                resolution_file = (f for f in self._files if isinstance(f, BonjourResolutionFile) and f.discovery_file==file and f.service_description==service_description).next()
             except StopIteration:
                 pass
             else:
@@ -268,7 +257,7 @@ class BonjourServices(object):
                 pass
             else:
                 transport = record.uri.transport
-                supported_transport = transport in settings.sip.transport_list and (transport!='tls' or settings.tls.certificate is not None)
+                supported_transport = transport in settings.sip.transport_list and (transport!='tls' or self.account.tls.certificate is not None)
                 if not supported_transport and service_description in self._neighbours:
                     record = self._neighbours.pop(service_description)
                     notification_center.post_notification('BonjourAccountDidRemoveNeighbour', sender=self.account, data=NotificationData(neighbour=service_description, record=record))
@@ -277,7 +266,7 @@ class BonjourServices(object):
                         our_contact_uri = self.account.contact[NoGRUU, transport]
                     except KeyError:
                         return
-                    if str(record.uri) != str(our_contact_uri):
+                    if record.uri != our_contact_uri:
                         had_neighbour = service_description in self._neighbours
                         self._neighbours[service_description] = record
                         notification_name = 'BonjourAccountDidUpdateNeighbour' if had_neighbour else 'BonjourAccountDidAddNeighbour'
@@ -334,30 +323,26 @@ class BonjourServices(object):
         if self._register_timer is not None and self._register_timer.active():
             self._register_timer.cancel()
         self._register_timer = None
-        supported_transports = set(transport for transport in settings.sip.transport_list if transport != 'tls' or settings.tls.certificate is not None)
+        supported_transports = set(transport for transport in settings.sip.transport_list if transport!='tls' or self.account.tls.certificate is not None)
         registered_transports = set(file.transport for file in self._files if isinstance(file, BonjourRegistrationFile))
         missing_transports = supported_transports - registered_transports
         added_transports = set()
-        
-        if len(missing_transports) > 1 and 'udp' in missing_transports:
-            missing_transports.remove('udp')
-    
         for transport in missing_transports:
             notification_center.post_notification('BonjourAccountWillRegister', sender=self.account, data=NotificationData(transport=transport))
             try:
                 contact = self.account.contact[NoGRUU, transport]
                 instance_id = str(uuid.UUID(settings.instance_id))
-                txtdata = dict(txtvers=1, name=self.account.display_name, contact="<%s>" % str(contact), instance_id=instance_id)
+                txtdata = dict(txtvers=1, name=self.account.display_name.encode('utf-8'), contact="<%s>" % str(contact), instance_id=instance_id)
                 state = self.account.presence_state
                 if self.account.presence.enabled and state is not None:
                     txtdata['state'] = state.state
-                    txtdata['note'] = state.note
+                    txtdata['note'] = state.note.encode('utf-8')
                 file = _bonjour.DNSServiceRegister(name=str(contact),
                                                    regtype="_sipuri._%s" % (transport if transport == 'udp' else 'tcp'),
                                                    port=contact.port,
                                                    callBack=self._register_cb,
                                                    txtRecord=_bonjour.TXTRecord(items=txtdata))
-            except (_bonjour.BonjourError, KeyError) as e:
+            except (_bonjour.BonjourError, KeyError), e:
                 notification_center.post_notification('BonjourAccountRegistrationDidFail', sender=self.account, data=NotificationData(reason=str(e), transport=transport))
             else:
                 self._files.append(BonjourRegistrationFile(file, transport))
@@ -365,7 +350,7 @@ class BonjourServices(object):
         if added_transports:
             self._select_proc.kill(RestartSelect)
         if added_transports != missing_transports:
-            self._register_timer = reactor.callLater(10, self._command_channel.send, Command('register', command.event))
+            self._register_timer = reactor.callLater(1, self._command_channel.send, Command('register', command.event))
         else:
             command.signal()
 
@@ -388,13 +373,13 @@ class BonjourServices(object):
             try:
                 contact = self.account.contact[NoGRUU, file.transport]
                 instance_id = str(uuid.UUID(settings.instance_id))
-                txtdata = dict(txtvers=1, name=self.account.display_name, contact="<%s>" % str(contact), instance_id=instance_id)
+                txtdata = dict(txtvers=1, name=self.account.display_name.encode('utf-8'), contact="<%s>" % str(contact), instance_id=instance_id)
                 state = self.account.presence_state
                 if self.account.presence.enabled and state is not None:
                     txtdata['state'] = state.state
-                    txtdata['note'] = state.note
+                    txtdata['note'] = state.note.encode('utf-8')
                 _bonjour.DNSServiceUpdateRecord(file.file, None, flags=0, rdata=_bonjour.TXTRecord(items=txtdata), ttl=0)
-            except (_bonjour.BonjourError, KeyError) as e:
+            except (_bonjour.BonjourError, KeyError), e:
                 notification_center.post_notification('BonjourAccountRegistrationUpdateDidFail', sender=self.account, data=NotificationData(reason=str(e), transport=file.transport))
                 update_failure = True
         self._command_channel.send(Command('register'))
@@ -409,7 +394,7 @@ class BonjourServices(object):
         if self._discover_timer is not None and self._discover_timer.active():
             self._discover_timer.cancel()
         self._discover_timer = None
-        supported_transports = set(transport for transport in settings.sip.transport_list if transport!='tls' or settings.tls.certificate is not None)
+        supported_transports = set(transport for transport in settings.sip.transport_list if transport!='tls' or self.account.tls.certificate is not None)
         discoverable_transports = set('tcp' if transport=='tls' else transport for transport in supported_transports)
         old_files = []
         for file in (f for f in self._files[:] if isinstance(f, (BonjourDiscoveryFile, BonjourResolutionFile)) and f.transport not in discoverable_transports):
@@ -418,7 +403,7 @@ class BonjourServices(object):
         self._select_proc.kill(RestartSelect)
         for file in old_files:
             file.close()
-        for service_description in [service for service, record in list(self._neighbours.items()) if record.uri.transport not in supported_transports]:
+        for service_description in [service for service, record in self._neighbours.iteritems() if record.uri.transport not in supported_transports]:
             record = self._neighbours.pop(service_description)
             notification_center.post_notification('BonjourAccountDidRemoveNeighbour', sender=self.account, data=NotificationData(neighbour=service_description, record=record))
         discovered_transports = set(file.transport for file in self._files if isinstance(file, BonjourDiscoveryFile))
@@ -428,7 +413,7 @@ class BonjourServices(object):
             notification_center.post_notification('BonjourAccountWillInitiateDiscovery', sender=self.account, data=NotificationData(transport=transport))
             try:
                 file = _bonjour.DNSServiceBrowse(regtype="_sipuri._%s" % transport, callBack=self._browse_cb)
-            except _bonjour.BonjourError as e:
+            except _bonjour.BonjourError, e:
                 notification_center.post_notification('BonjourAccountDiscoveryDidFail', sender=self.account, data=NotificationData(reason=str(e), transport=transport))
             else:
                 self._files.append(BonjourDiscoveryFile(file, transport))
@@ -436,7 +421,7 @@ class BonjourServices(object):
         if added_transports:
             self._select_proc.kill(RestartSelect)
         if added_transports != missing_transports:
-            self._discover_timer = reactor.callLater(5, self._command_channel.send, Command('discover', command.event))
+            self._discover_timer = reactor.callLater(1, self._command_channel.send, Command('discover', command.event))
         else:
             command.signal()
 
@@ -470,7 +455,7 @@ class BonjourServices(object):
         for file in files:
             file.close()
         notification_center = NotificationCenter()
-        for neighbour, record in list(neighbours.items()):
+        for neighbour, record in neighbours.iteritems():
             notification_center.post_notification('BonjourAccountDidRemoveNeighbour', sender=self.account, data=NotificationData(neighbour=neighbour, record=record))
         for transport in set(file.transport for file in files):
             notification_center.post_notification('BonjourAccountRegistrationDidEnd', sender=self.account, data=NotificationData(transport=transport))
@@ -490,7 +475,7 @@ class BonjourServices(object):
 class BonjourPresenceState(object):
     def __init__(self, state, note=None):
         self.state = state
-        self.note = note or ''
+        self.note = note or u''
 
     def __eq__(self, other):
         if isinstance(other, BonjourPresenceState):

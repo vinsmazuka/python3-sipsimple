@@ -16,7 +16,7 @@ from eventlib.util import tcp_socket, set_reuse_addr
 from msrplib.protocol import FailureReportHeader, SuccessReportHeader, ContentTypeHeader
 from msrplib.transport import make_response, make_report
 from twisted.internet.error import ConnectionDone
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core import SDPAttribute
 from sipsimple.streams import InvalidStreamError, UnknownStreamError
@@ -27,8 +27,10 @@ from sipsimple.threading import run_in_twisted_thread
 class VNCConnectionError(Exception): pass
 
 
-@implementer(IObserver)
-class ScreenSharingHandler(object, metaclass=ABCMeta):
+class ScreenSharingHandler(object):
+    __metaclass__ = ABCMeta
+
+    implements(IObserver)
 
     def __init__(self):
         self.incoming_msrp_queue = None
@@ -130,7 +132,7 @@ class ExternalVNCViewerHandler(ScreenSharingViewerHandler):
             try:
                 data = self.incoming_msrp_queue.wait()
                 self.vnc_socket.sendall(data)
-            except Exception as e:
+            except Exception, e:
                 self.msrp_reader_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
                 NotificationCenter().post_notification('ScreenSharingHandlerDidFail', sender=self, data=NotificationData(context='sending', reason=str(e)))
                 break
@@ -142,7 +144,7 @@ class ExternalVNCViewerHandler(ScreenSharingViewerHandler):
                 if not data:
                     raise VNCConnectionError("connection with the VNC viewer was closed")
                 self.outgoing_msrp_queue.send(data)
-            except Exception as e:
+            except Exception, e:
                 self.msrp_writer_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
                 NotificationCenter().post_notification('ScreenSharingHandlerDidFail', sender=self, data=NotificationData(context='reading', reason=str(e)))
                 break
@@ -153,7 +155,7 @@ class ExternalVNCViewerHandler(ScreenSharingViewerHandler):
             self.vnc_socket.close()
             self.vnc_socket = sock
             self.vnc_socket.settimeout(None)
-        except Exception as e:
+        except Exception, e:
             self.vnc_starter_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
             NotificationCenter().post_notification('ScreenSharingHandlerDidFail', sender=self, data=NotificationData(context='connecting', reason=str(e)))
         else:
@@ -187,7 +189,7 @@ class ExternalVNCServerHandler(ScreenSharingServerHandler):
             try:
                 data = self.incoming_msrp_queue.wait()
                 self.vnc_socket.sendall(data)
-            except Exception as e:
+            except Exception, e:
                 self.msrp_reader_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
                 NotificationCenter().post_notification('ScreenSharingHandlerDidFail', sender=self, data=NotificationData(context='sending', reason=str(e)))
                 break
@@ -199,7 +201,7 @@ class ExternalVNCServerHandler(ScreenSharingServerHandler):
                 if not data:
                     raise VNCConnectionError("connection to the VNC server was closed")
                 self.outgoing_msrp_queue.send(data)
-            except Exception as e:
+            except Exception, e:
                 self.msrp_writer_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
                 NotificationCenter().post_notification('ScreenSharingHandlerDidFail', sender=self, data=NotificationData(context='reading', reason=str(e)))
                 break
@@ -210,7 +212,7 @@ class ExternalVNCServerHandler(ScreenSharingServerHandler):
             self.vnc_socket.settimeout(self.connect_timeout)
             self.vnc_socket.connect(self.address)
             self.vnc_socket.settimeout(None)
-        except Exception as e:
+        except Exception, e:
             self.vnc_starter_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
             NotificationCenter().post_notification('ScreenSharingHandlerDidFail', sender=self, data=NotificationData(context='connecting', reason=str(e)))
         else:
@@ -257,31 +259,29 @@ class ScreenSharingStream(MSRPStreamBase):
     @classmethod
     def new_from_sdp(cls, session, remote_sdp, stream_index):
         remote_stream = remote_sdp.media[stream_index]
-        if remote_stream.media != b'application':
+        if remote_stream.media != 'application':
             raise UnknownStreamError
-        accept_types = remote_stream.attributes.getfirst(b'accept-types', None)
-        accept_types = accept_types.decode() if accept_types else None
+        accept_types = remote_stream.attributes.getfirst('accept-types', None)
         if accept_types is None or 'application/x-rfb' not in accept_types.split():
             raise UnknownStreamError
         expected_transport = 'TCP/TLS/MSRP' if session.account.msrp.transport=='tls' else 'TCP/MSRP'
-        if remote_stream.transport != expected_transport.encode():
+        if remote_stream.transport != expected_transport:
             raise InvalidStreamError("expected %s transport in chat stream, got %s" % (expected_transport, remote_stream.transport))
-        if remote_stream.formats != [b'*']:
+        if remote_stream.formats != ['*']:
             raise InvalidStreamError("wrong format list specified")
-        remote_rfbsetup = remote_stream.attributes.getfirst(b'rfbsetup', b'active')
-        remote_rfbsetup
-        if remote_rfbsetup == b'active':
+        remote_rfbsetup = remote_stream.attributes.getfirst('rfbsetup', 'active')
+        if remote_rfbsetup == 'active':
             stream = cls(mode='server')
-        elif remote_rfbsetup == b'passive':
+        elif remote_rfbsetup == 'passive':
             stream = cls(mode='viewer')
         else:
             raise InvalidStreamError("unknown rfbsetup attribute in the remote screen sharing stream")
-        stream.remote_role = remote_stream.attributes.getfirst(b'setup', b'active')
+        stream.remote_role = remote_stream.attributes.getfirst('setup', 'active')
         return stream
 
     def _create_local_media(self, uri_path):
         local_media = super(ScreenSharingStream, self)._create_local_media(uri_path)
-        local_media.attributes.append(SDPAttribute(b'rfbsetup', self.handler.type.encode()))
+        local_media.attributes.append(SDPAttribute('rfbsetup', self.handler.type))
         return local_media
 
     def _msrp_reader(self):
@@ -305,7 +305,7 @@ class ScreenSharingStream(MSRPStreamBase):
                     self.msrp.write_chunk(response)
                 if report is not None:
                     self.msrp.write_chunk(report)
-            except Exception as e:
+            except Exception, e:
                 self.msrp_reader_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
                 if self.shutting_down and isinstance(e, ConnectionDone):
                     break
@@ -322,7 +322,7 @@ class ScreenSharingStream(MSRPStreamBase):
                 chunk.add_header(FailureReportHeader('partial'))
                 chunk.add_header(ContentTypeHeader('application/x-rfb'))
                 self.msrp.write_chunk(chunk)
-            except Exception as e:
+            except Exception, e:
                 self.msrp_writer_thread = None # avoid issues caused by the notification handler killing this greenlet during post_notification
                 if self.shutting_down and isinstance(e, ConnectionDone):
                     break

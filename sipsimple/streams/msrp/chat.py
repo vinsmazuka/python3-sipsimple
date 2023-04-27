@@ -3,14 +3,11 @@
 This module provides classes to parse and generate SDP related to SIP sessions that negotiate Instant Messaging, including CPIM as defined in RFC3862
 """
 
-import binascii
-import pickle as pickle
+import cPickle as pickle
 import codecs
 import os
 import random
 import re
-from email import charset as _charset
-Charset = _charset.Charset
 
 from application.python.descriptor import WriteOnceAttribute
 from application.notification import IObserver, NotificationCenter, NotificationData
@@ -28,7 +25,7 @@ from msrplib.session import MSRPSession, contains_mime_type
 from otr import OTRSession, OTRTransport, OTRState, SMPStatus
 from otr.cryptography import DSAPrivateKey
 from otr.exceptions import IgnoreMessage, UnencryptedMessage, EncryptedMessageError, OTRError
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core import SIPURI, BaseSIPURI
 from sipsimple.payloads import ParserError
@@ -44,35 +41,11 @@ from sipsimple.util import MultilingualText, ISOTimestamp
 __all__ = ['ChatStream', 'ChatStreamError', 'ChatIdentity', 'CPIMPayload', 'CPIMHeader', 'CPIMNamespace', 'CPIMParserError', 'OTRState', 'SMPStatus']
 
 
-class ChatMimeMessage(EmailMessage):
-    def set_charset(self, charset):
-        # avoid automatic adding of Content-Transfer-Encoding header and conversion to base64
-        # TODO: it seems impossible to get rid of the header itself though, is deep inside email.Generator._write
-
-        if charset is None:
-            self.del_param('charset')
-            self._charset = None
-            return
-
-        if not isinstance(charset, Charset):
-            charset = Charset(charset)
-
-        self._charset = charset
-
-        if 'MIME-Version' not in self:
-            self.add_header('MIME-Version', '1.0')
-
-        if 'Content-Type' not in self:
-            self.add_header('Content-Type', 'text/plain', charset=charset.get_output_charset())
-        else:
-            self.set_param('charset', charset.get_output_charset())
-    
-
 class OTRTrustedPeer(object):
     fingerprint = WriteOnceAttribute()  # in order to be hashable this needs to be immutable
 
-    def __init__(self, fingerprint, description='', **kw):
-        if not isinstance(fingerprint, str):
+    def __init__(self, fingerprint, description=u'', **kw):
+        if not isinstance(fingerprint, basestring):
             raise TypeError("fingerprint must be a string")
         self.fingerprint = fingerprint
         self.description = description
@@ -84,7 +57,7 @@ class OTRTrustedPeer(object):
     def __eq__(self, other):
         if isinstance(other, OTRTrustedPeer):
             return self.fingerprint == other.fingerprint
-        elif isinstance(other, str):
+        elif isinstance(other, basestring):
             return self.fingerprint == other
         else:
             return NotImplemented
@@ -105,7 +78,7 @@ class OTRTrustedPeerSet(object):
         self.update(iterable)
 
     def __repr__(self):
-        return "{}({})".format(self.__class__.__name__, list(self.__data__.values()))
+        return "{}({})".format(self.__class__.__name__, self.__data__.values())
 
     def __contains__(self, item):
         return item in self.__data__
@@ -114,7 +87,7 @@ class OTRTrustedPeerSet(object):
         return self.__data__[item]
 
     def __iter__(self):
-        return iter(list(self.__data__.values()))
+        return self.__data__.itervalues()
 
     def __len__(self):
         return len(self.__data__)
@@ -138,7 +111,9 @@ class OTRTrustedPeerSet(object):
             self.add(item)
 
 
-class OTRCache(object, metaclass=Singleton):
+class OTRCache(object):
+    __metaclass__ = Singleton
+
     def __init__(self):
         from sipsimple.application import SIPApplication
         if SIPApplication.storage is None:
@@ -173,12 +148,12 @@ class OTRCache(object, metaclass=Singleton):
     @run_in_thread('file-io')
     def save(self):
         if self.trusted_file is not None:
-            with openfile(self.trusted_file, 'wb', permissions=0o600) as trusted_file:
+            with openfile(self.trusted_file, 'wb', permissions=0600) as trusted_file:
                 pickle.dump(self.trusted_peers, trusted_file)
 
 
-@implementer(IObserver)
 class OTREncryption(object):
+    implements(IObserver)
 
     def __init__(self, stream):
         self.stream = stream
@@ -203,15 +178,15 @@ class OTREncryption(object):
     @property
     def key_fingerprint(self):
         try:
-            return binascii.hexlify(self.otr_session.local_private_key.public_key.fingerprint).decode()
-        except (AttributeError, TypeError):
+            return self.otr_session.local_private_key.public_key.fingerprint
+        except AttributeError:
             return None
 
     @property
     def peer_fingerprint(self):
         try:
-            return binascii.hexlify(self.otr_session.remote_public_key.fingerprint).decode()
-        except (AttributeError, TypeError):
+            return self.otr_session.remote_public_key.fingerprint
+        except AttributeError:
             return None
 
     @property
@@ -221,7 +196,7 @@ class OTREncryption(object):
         except KeyError:
             trusted_peer = self.otr_cache.trusted_peers.get(self.peer_fingerprint, None)
             if trusted_peer is None:
-                return ''
+                return u''
             else:
                 return self.__dict__.setdefault('peer_name', trusted_peer.description)
 
@@ -334,29 +309,28 @@ class ChatStream(MSRPStreamBase):
     @classmethod
     def new_from_sdp(cls, session, remote_sdp, stream_index):
         remote_stream = remote_sdp.media[stream_index]
-        if remote_stream.media != b'message':
+        if remote_stream.media != 'message':
             raise UnknownStreamError
         expected_transport = 'TCP/TLS/MSRP' if session.account.msrp.transport=='tls' else 'TCP/MSRP'
-        if remote_stream.transport != expected_transport.encode():
+        if remote_stream.transport != expected_transport:
             raise InvalidStreamError("expected %s transport in chat stream, got %s" % (expected_transport, remote_stream.transport))
-        if remote_stream.formats != [b'*']:
+        if remote_stream.formats != ['*']:
             raise InvalidStreamError("wrong format list specified")
         stream = cls()
-        stream.remote_role = remote_stream.attributes.getfirst(b'setup', b'active')
-        
-        if remote_stream.direction != b'sendrecv':
+        stream.remote_role = remote_stream.attributes.getfirst('setup', 'active')
+        if remote_stream.direction != 'sendrecv':
             raise InvalidStreamError("Unsupported direction for chat stream: %s" % remote_stream.direction)
-        remote_accept_types = remote_stream.attributes.getfirst(b'accept-types')
+        remote_accept_types = remote_stream.attributes.getfirst('accept-types')
         if remote_accept_types is None:
             raise InvalidStreamError("remote SDP media does not have 'accept-types' attribute")
-        if not any(contains_mime_type(cls.accept_types, mime_type) for mime_type in remote_accept_types.decode().split()):
+        if not any(contains_mime_type(cls.accept_types, mime_type) for mime_type in remote_accept_types.split()):
             raise InvalidStreamError("no compatible media types found")
         return stream
 
     @property
     def local_identity(self):
         try:
-            return ChatIdentity(self.session.local_identity.uri, self.session.local_identity.display_name)
+            return ChatIdentity(self.session.local_identity.uri, self.session.account.display_name)
         except AttributeError:
             return None
 
@@ -379,9 +353,7 @@ class ChatStream(MSRPStreamBase):
     def chatroom_capabilities(self):
         try:
             if self.cpim_enabled and self.session.remote_focus:
-                chatroom = self.remote_media.attributes.getfirst(b'chatroom')
-                chatroom_caps = chatroom.decode().split() if chatroom else []
-                return chatroom_caps
+                return ' '.join(self.remote_media.attributes.getall('chatroom')).split()
         except AttributeError:
             pass
         return []
@@ -436,8 +408,8 @@ class ChatStream(MSRPStreamBase):
             self.msrp_session.send_report(chunk, 200, 'OK')
             return
         else:
-            data = ''.join(self.incoming_queue.pop(chunk.message_id, [])) + chunk.data.decode()
-            
+            data = ''.join(self.incoming_queue.pop(chunk.message_id, [])) + chunk.data
+
         if content_type == 'message/cpim':
             try:
                 payload = CPIMPayload.decode(data)
@@ -453,7 +425,6 @@ class ChatStream(MSRPStreamBase):
                     message.timestamp = ISOTimestamp.now()
                 if message.sender is None:
                     message.sender = self.remote_identity
-
                 private = self.session.remote_focus and len(message.recipients) == 1 and message.recipients[0] != self.remote_identity
         else:
             payload = SimplePayload.decode(data, content_type)
@@ -461,20 +432,19 @@ class ChatStream(MSRPStreamBase):
             private = False
 
         try:
-            content = message.content if isinstance(message.content, bytes) else message.content.encode()
-            message.content = self.encryption.otr_session.handle_input(content, message.content_type)
+            message.content = self.encryption.otr_session.handle_input(message.content, message.content_type)
         except IgnoreMessage:
             self.msrp_session.send_report(chunk, 200, 'OK')
             return
         except UnencryptedMessage:
             encrypted = False
             encryption_active = True
-        except EncryptedMessageError as e:
+        except EncryptedMessageError, e:
             self.msrp_session.send_report(chunk, 400, str(e))
             notification_center = NotificationCenter()
             notification_center.post_notification('ChatStreamOTRError', sender=self, data=NotificationData(error=str(e)))
             return
-        except OTRError as e:
+        except OTRError, e:
             self.msrp_session.send_report(chunk, 200, 'OK')
             notification_center = NotificationCenter()
             notification_center.post_notification('ChatStreamOTRError', sender=self, data=NotificationData(error=str(e)))
@@ -485,13 +455,13 @@ class ChatStream(MSRPStreamBase):
         if payload.charset is not None:
             message.content = message.content.decode(payload.charset)
         elif payload.content_type.startswith('text/'):
-            message.content = message.content.decode('utf8')
+            message.content.decode('utf8')
 
         notification_center = NotificationCenter()
         if message.content_type.lower() == IsComposingDocument.content_type:
             try:
                 document = IsComposingDocument.parse(message.content)
-            except (ParserError, OSError) as e:
+            except ParserError as e:
                 self.msrp_session.send_report(chunk, 400, str(e))
                 return
             self.msrp_session.send_report(chunk, 200, 'OK')
@@ -532,7 +502,7 @@ class ChatStream(MSRPStreamBase):
                     break
 
                 try:
-                    if isinstance(message.content, str):
+                    if isinstance(message.content, unicode):
                         message.content = message.content.encode('utf8')
                         charset = 'utf8'
                     else:
@@ -541,7 +511,7 @@ class ChatStream(MSRPStreamBase):
                     if not isinstance(message, QueuedOTRInternalMessage):
                         try:
                             message.content = self.encryption.otr_session.handle_output(message.content, message.content_type)
-                        except OTRError as e:
+                        except OTRError, e:
                             raise ChatStreamError(str(e))
 
                     message.sender = message.sender or self.local_identity
@@ -567,7 +537,7 @@ class ChatStream(MSRPStreamBase):
                         payload = CPIMPayload(charset=charset, **{name: getattr(message, name) for name in Message.__slots__})
                     else:
                         payload = SimplePayload(message.content, message.content_type, charset)
-                except ChatStreamError as e:
+                except ChatStreamError, e:
                     if message.notify_progress:
                         data = NotificationData(message_id=message.id, message=None, code=0, reason=e.args[0])
                         notification_center.post_notification('ChatStreamDidNotDeliverMessage', sender=self, data=data)
@@ -585,7 +555,7 @@ class ChatStream(MSRPStreamBase):
 
                 try:
                     self.msrp_session.send_chunk(chunk, response_cb=partial(self._on_transaction_response, message_id))
-                except Exception as e:
+                except Exception, e:
                     if notify_progress:
                         data = NotificationData(message_id=message_id, message=None, code=0, reason=str(e))
                         notification_center.post_notification('ChatStreamDidNotDeliverMessage', sender=self, data=data)
@@ -626,10 +596,10 @@ class ChatStream(MSRPStreamBase):
             # should we generate ChatStreamDidNotSetNickname here?
             return
         chunk = self.msrp.make_request('NICKNAME')
-        chunk.add_header(UseNicknameHeader(nickname or ''))
+        chunk.add_header(UseNicknameHeader(nickname or u''))
         try:
             self.msrp_session.send_chunk(chunk, response_cb=partial(self._on_nickname_transaction_response, message_id))
-        except Exception as e:
+        except Exception, e:
             self._failure_reason = str(e)
             NotificationCenter().post_notification('MediaStreamDidFail', sender=self, data=NotificationData(context='sending', reason=self._failure_reason))
 
@@ -671,18 +641,10 @@ class ChatIdentity(object):
 
     def __eq__(self, other):
         if isinstance(other, ChatIdentity):
-            left_user = self.uri.user.decode() if isinstance(self.uri.user, bytes) else self.uri.user
-            right_user = other.uri.user.decode() if isinstance(other.uri.user, bytes) else other.uri.user
-            left_host = self.uri.host.decode() if isinstance(self.uri.host, bytes) else self.uri.host
-            right_host = other.uri.host.decode() if isinstance(other.uri.host, bytes) else other.uri.host
-            return left_user == right_user and left_host == right_host
+            return self.uri.user == other.uri.user and self.uri.host == other.uri.host
         elif isinstance(other, BaseSIPURI):
-            left_user = self.uri.user.decode() if isinstance(self.uri.user, bytes) else self.uri.user
-            right_user = other.user.decode() if isinstance(other.user, bytes) else other.user
-            left_host = self.uri.host.decode() if isinstance(self.uri.host, bytes) else self.uri.host
-            right_host = other.host.decode() if isinstance(other.host, bytes) else other.host
-            return left_user == right_user and left_host == right_host
-        elif isinstance(other, str):
+            return self.uri.user == other.user and self.uri.host == other.host
+        elif isinstance(other, basestring):
             try:
                 other_uri = SIPURI.parse(other)
             except Exception:
@@ -699,15 +661,16 @@ class ChatIdentity(object):
         return '{0.__class__.__name__}(uri={0.uri!r}, display_name={0.display_name!r})'.format(self)
 
     def __str__(self):
+        return self.__unicode__().encode('utf-8')
+
+    def __unicode__(self):
         if self.display_name:
-            return '{0.display_name} <{0.uri}>'.format(self)
+            return u'{0.display_name} <{0.uri}>'.format(self)
         else:
-            return '<{0.uri}>'.format(self)
+            return u'<{0.uri}>'.format(self)
 
     @classmethod
     def parse(cls, value):
-        value = value.decode() if isinstance(value, bytes) else value
-        
         match = cls._format_re.match(value)
         if match is None:
             raise ValueError('Cannot parse identity value: %r' % value)
@@ -768,13 +731,15 @@ class SimplePayload(object):
 
 
 class CPIMPayload(object):
-    standard_namespace = 'urn:ietf:params:cpim-headers:'
+    standard_namespace = u'urn:ietf:params:cpim-headers:'
 
     headers_re = re.compile(r'(?:([^:]+?)\.)?(.+?):\s*(.+?)(?:\r\n|$)')
     subject_re = re.compile(r'^(?:;lang=([a-z]{1,8}(?:-[a-z0-9]{1,8})*)\s+)?(.*)$')
     namespace_re = re.compile(r'^(?:(\S+) ?)?<(.*)>$')
 
     def __init__(self, content, content_type, charset=None, sender=None, recipients=None, courtesy_recipients=None, subject=None, timestamp=None, required=None, additional_headers=None):
+        if not isinstance(content, bytes):
+            raise TypeError("content should be an instance of bytes")
         self.content = content
         self.content_type = content_type
         self.charset = charset
@@ -787,39 +752,38 @@ class CPIMPayload(object):
         self.additional_headers = additional_headers or []
 
     def encode(self):
-        namespaces = {'': CPIMNamespace(self.standard_namespace)}
+        namespaces = {u'': CPIMNamespace(self.standard_namespace)}
         header_list = []
 
         if self.sender is not None:
-            header_list.append('From: {}'.format(self.sender))
-        header_list.extend('To: {}'.format(recipient) for recipient in self.recipients)
-        header_list.extend('cc: {}'.format(recipient) for recipient in self.courtesy_recipients)
+            header_list.append(u'From: {}'.format(self.sender))
+        header_list.extend(u'To: {}'.format(recipient) for recipient in self.recipients)
+        header_list.extend(u'cc: {}'.format(recipient) for recipient in self.courtesy_recipients)
         if self.subject is not None:
-            header_list.append('Subject: {}'.format(self.subject))
-            header_list.extend('Subject:;lang={} {}'.format(language, translation) for language, translation in list(self.subject.translations.items()))
+            header_list.append(u'Subject: {}'.format(self.subject))
+            header_list.extend(u'Subject:;lang={} {}'.format(language, translation) for language, translation in self.subject.translations.iteritems())
         if self.timestamp is not None:
-            header_list.append('DateTime: {}'.format(self.timestamp))
+            header_list.append(u'DateTime: {}'.format(self.timestamp))
         if self.required:
-            header_list.append('Required: {}'.format(','.join(self.required)))
+            header_list.append(u'Required: {}'.format(','.join(self.required)))
 
         for header in self.additional_headers:
             if namespaces.get(header.namespace.prefix) != header.namespace:
                 if header.namespace.prefix:
-                    header_list.append('NS: {0.namespace.prefix} <{0.namespace}>'.format(header))
+                    header_list.append(u'NS: {0.namespace.prefix} <{0.namespace}>'.format(header))
                 else:
-                    header_list.append('NS: <{0.namespace}>'.format(header))
+                    header_list.append(u'NS: <{0.namespace}>'.format(header))
                 namespaces[header.namespace.prefix] = header.namespace
             if header.namespace.prefix:
-                header_list.append('{0.namespace.prefix}.{0.name}: {0.value}'.format(header))
+                header_list.append(u'{0.namespace.prefix}.{0.name}: {0.value}'.format(header))
             else:
-                header_list.append('{0.name}: {0.value}'.format(header))
+                header_list.append(u'{0.name}: {0.value}'.format(header))
 
-        headers = '\r\n'.join(header_list)
+        headers = '\r\n'.join(header.encode('cpim-header') for header in header_list)
 
-        mime_message = ChatMimeMessage()
+        mime_message = EmailMessage()
         mime_message.set_payload(self.content)
         mime_message.set_type(self.content_type)
-
         if self.charset is not None:
             mime_message.set_param('charset', self.charset)
 
@@ -827,7 +791,9 @@ class CPIMPayload(object):
 
     @classmethod
     def decode(cls, message):
-        message = message.decode() if isinstance(message, bytes) else message
+        if not isinstance(message, bytes):
+            raise TypeError("message should be an instance of bytes")
+
         headers, separator, body = message.partition('\r\n\r\n')
         if not separator:
             raise CPIMParserError('Invalid CPIM message')
@@ -840,7 +806,7 @@ class CPIMPayload(object):
         required = []
         additional_headers = []
 
-        namespaces = {'': CPIMNamespace(cls.standard_namespace)}
+        namespaces = {u'': CPIMNamespace(cls.standard_namespace)}
         subjects = {}
 
         for prefix, name, value in cls.headers_re.findall(headers):
@@ -850,13 +816,12 @@ class CPIMPayload(object):
                 continue
 
             try:
-                #value = value.decode('cpim-header')
+                value = value.decode('cpim-header')
                 if namespace == cls.standard_namespace:
                     if name == 'From':
                         sender = ChatIdentity.parse(value)
                     elif name == 'To':
-                        to = ChatIdentity.parse(value);
-                        recipients.append(to)
+                        recipients.append(ChatIdentity.parse(value))
                     elif name == 'cc':
                         courtesy_recipients.append(ChatIdentity.parse(value))
                     elif name == 'Subject':
@@ -890,26 +855,20 @@ class CPIMPayload(object):
 
         mime_message = EmailParser().parsestr(body)
         content_type = mime_message.get_content_type()
-        
         if content_type is None:
             raise CPIMParserError("CPIM message missing Content-Type MIME header")
         content = mime_message.get_payload()
-        # If the content_type is 'message/imdn+xml' the parser thinks it is a multipart message, hence the result of get_payload
-        # will be a list. Since it is not actually a list we take first item in the list and get the payload again
-        # --Tijmen
-        if content_type == 'message/imdn+xml':
-            content = content[0].get_payload()
         charset = mime_message.get_content_charset()
 
-        return cls(content.encode(), content_type, charset, sender, recipients, courtesy_recipients, subject, timestamp, required, additional_headers)
+        return cls(content, content_type, charset, sender, recipients, courtesy_recipients, subject, timestamp, required, additional_headers)
 
 
-class CPIMParserError(Exception): pass
+class CPIMParserError(StandardError): pass
 
 
-class CPIMNamespace(str):
-    def __new__(cls, value, prefix=''):
-        obj = str.__new__(cls, value)
+class CPIMNamespace(unicode):
+    def __new__(cls, value, prefix=u''):
+        obj = unicode.__new__(cls, value)
         obj.prefix = prefix
         return obj
 
@@ -922,8 +881,8 @@ class CPIMHeader(object):
 
 
 class CPIMCodec(codecs.Codec):
-    character_map = {c: '\\u{:04x}'.format(c) for c in list(range(32)) + [127]}
-    character_map[ord('\\')] = '\\\\'
+    character_map = {c: u'\\u{:04x}'.format(c) for c in range(32) + [127]}
+    character_map[ord(u'\\')] = u'\\\\'
 
     @classmethod
     def encode(cls, input, errors='strict'):

@@ -143,7 +143,9 @@ class Type(XMLStringElement):
     _xml_value_type = ContentTypeValue
 
 
-class ClassRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class ClassRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -186,7 +188,9 @@ class Class(XMLElement):
         self.not_supported = not_supported
 
 
-class DuplexRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class DuplexRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -229,7 +233,9 @@ class Duplex(XMLElement):
         self.not_supported = not_supported
 
 
-class EventRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class EventRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -362,7 +368,9 @@ class Priority(XMLElement):
         self.not_supported = not_supported
 
 
-class MethodRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class MethodRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -408,7 +416,9 @@ class Methods(XMLElement):
         self.not_supported = not_supported
 
 
-class ExtensionRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class ExtensionRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -498,7 +508,9 @@ class Schemes(XMLElement):
         self.not_supported = not_supported
 
 
-class ActorRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class ActorRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 
@@ -558,17 +570,17 @@ class LanguageSupported(XMLListElement):
         self.update(supported)
 
     def __iter__(self):
-        return (str(item) for item in super(LanguageSupported, self).__iter__())
+        return (unicode(item) for item in super(LanguageSupported, self).__iter__())
 
     def add(self, item):
-        if isinstance(item, str):
+        if isinstance(item, basestring):
             item = Language(item)
         super(LanguageSupported, self).add(item)
 
     def remove(self, item):
-        if isinstance(item, str):
+        if isinstance(item, basestring):
             try:
-                item = next((entry for entry in super(LanguageSupported, self).__iter__() if entry == item))
+                item = (entry for entry in super(LanguageSupported, self).__iter__() if entry == item).next()
             except StopIteration:
                 raise KeyError(item)
         super(LanguageSupported, self).remove(item)
@@ -585,17 +597,17 @@ class LanguageNotSupported(XMLListElement):
         self.update(not_supported)
 
     def __iter__(self):
-        return (str(item) for item in super(LanguageNotSupported, self).__iter__())
+        return (unicode(item) for item in super(LanguageNotSupported, self).__iter__())
 
     def add(self, item):
-        if isinstance(item, str):
+        if isinstance(item, basestring):
             item = Language(item)
         super(LanguageNotSupported, self).add(item)
 
     def remove(self, item):
-        if isinstance(item, str):
+        if isinstance(item, basestring):
             try:
-                item = next((entry for entry in super(LanguageNotSupported, self).__iter__() if entry == item))
+                item = (entry for entry in super(LanguageNotSupported, self).__iter__() if entry == item).next()
             except StopIteration:
                 raise KeyError(item)
         super(LanguageNotSupported, self).remove(item)
@@ -701,7 +713,9 @@ class ServiceCapabilities(XMLListElement, ServiceExtension):
 Service.register_extension('capabilities', type=ServiceCapabilities)
 
 
-class MobilityRegistry(object, metaclass=XMLEmptyElementRegistryType):
+class MobilityRegistry(object):
+    __metaclass__ = XMLEmptyElementRegistryType
+
     _xml_namespace = namespace
     _xml_document = PIDFDocument
 

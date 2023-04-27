@@ -1,12 +1,12 @@
 
 """Video support"""
 
-
+from __future__ import absolute_import
 
 __all__ = ['IVideoProducer', 'VideoDevice', 'VideoError']
 
 from application.notification import NotificationCenter, NotificationData
-from zope.interface import Attribute, Interface, implementer
+from zope.interface import Attribute, Interface, implements
 
 from sipsimple.core import SIPCoreError, VideoCamera
 
@@ -24,8 +24,8 @@ class VideoError(Exception):
     pass
 
 
-@implementer(IVideoProducer)
 class VideoDevice(object):
+    implements(IVideoProducer)
 
     def __init__(self, device_name, resolution, framerate):
         self._camera = self._open_camera(device_name, resolution, framerate)
@@ -36,7 +36,7 @@ class VideoDevice(object):
             return VideoCamera(device_name, resolution, framerate)
         except SIPCoreError:
             try:
-                return VideoCamera('system_default', resolution, framerate)
+                return VideoCamera(u'system_default', resolution, framerate)
             except SIPCoreError:
                 return VideoCamera(None, resolution, framerate)
 

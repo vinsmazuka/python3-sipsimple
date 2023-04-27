@@ -12,7 +12,7 @@ cdef class EndpointAddress:
         return "%s(%r, %r)" % (self.__class__.__name__, self.ip, self.port)
 
     def __str__(self):
-        return "%s:%d" % (self.ip.decode(), self.port)
+        return "%s:%d" % (self.ip, self.port)
 
 
 cdef class Request:
@@ -67,7 +67,7 @@ cdef class Request:
 
     def __init__(self, method, SIPURI request_uri not None, FromHeader from_header not None, ToHeader to_header not None,
                  RouteHeader route_header not None, Credentials credentials=None, ContactHeader contact_header=None, call_id=None, cseq=None,
-                 object extra_headers=None, content_type=None, body=None):
+                 object extra_headers=None, content_type=None, body=None, Invitation inv=None):
         cdef pjsip_method method_pj
         cdef PJSTR from_header_str
         cdef PJSTR to_header_str
@@ -81,7 +81,6 @@ cdef class Request:
         cdef pjsip_cid_hdr *cid_hdr
         cdef pjsip_cseq_hdr *cseq_hdr
         cdef int status
-        cdef dict event_dict
         cdef PJSIPUA ua = _get_ua()
         if self._tsx != NULL or self.state != "INIT":
             raise SIPCoreError("Request.__init__() was already called")
@@ -99,16 +98,15 @@ cdef class Request:
             raise ValueError("Cannot specify a content_type without a body")
         if content_type is None and body is not None:
             raise ValueError("Cannot specify a body without a content_type")
-        self._method = PJSTR(method.encode())
+        self._method = PJSTR(method)
         pjsip_method_init_np(&method_pj, &self._method.pj_str)
         if credentials is not None:
             self.credentials = FrozenCredentials.new(credentials)
-        from_header_str = PJSTR(from_header.body.encode())
+        from_header_str = PJSTR(from_header.body)
         self.to_header = FrozenToHeader.new(to_header)
-        to_header_str = PJSTR(to_header.body.encode())
-        struri = str(request_uri)
+        to_header_str = PJSTR(to_header.body)
         self.request_uri = FrozenSIPURI.new(request_uri)
-        request_uri_str = PJSTR(struri.encode())
+        request_uri_str = PJSTR(str(request_uri))
         self.route_header = FrozenRouteHeader.new(route_header)
         self.route_header.uri.parameters.dict["lr"] = None # always send lr parameter in Route header
         self.route_header.uri.parameters.dict["hide"] = None # always hide Route header
@@ -118,7 +116,7 @@ cdef class Request:
             contact_parameters.pop("q", None)
             contact_parameters.pop("expires", None)
             contact_header.parameters = {}
-            contact_header_str = PJSTR(contact_header.body.encode())
+            contact_header_str = PJSTR(contact_header.body)
             contact_header_pj = &contact_header_str.pj_str
         if call_id is not None:
             self._call_id = PJSTR(call_id)
@@ -133,34 +131,40 @@ cdef class Request:
             self.extra_headers = frozenlist([header.frozen_type.new(header) for header in extra_headers])
         if body is not None:
             content_type_spl = content_type.split("/", 1)
-            self._content_type = PJSTR(content_type_spl[0].encode())
-            self._content_subtype = PJSTR(content_type_spl[1].encode())
+            self._content_type = PJSTR(content_type_spl[0])
+            self._content_subtype = PJSTR(content_type_spl[1])
             self._body = PJSTR(body)
+
+        if inv is not None and inv._dialog != NULL:
+            # Trying to inc & get cseq from inv._dialog
+            with nogil:
+                pjsip_dlg_inc_lock(inv._dialog);
+            self.cseq = inv._dialog.local.cseq;
+            inv._dialog.local.cseq += 1
 
         status = pjsip_endpt_create_request(ua._pjsip_endpoint._obj, &method_pj, &request_uri_str.pj_str,
                                             &from_header_str.pj_str, &to_header_str.pj_str, contact_header_pj,
                                             call_id_pj, self.cseq, NULL, &self._tdata)
+
+        if inv is not None and inv._dialog != NULL:
+            with nogil:
+                pjsip_dlg_dec_lock(inv._dialog);
+
         if status != 0:
             raise PJSIPError("Could not create request", status)
         if body is not None:
             self._tdata.msg.body = pjsip_msg_body_create(self._tdata.pool, &self._content_type.pj_str,
                                                          &self._content_subtype.pj_str, &self._body.pj_str)
-
-        status = _BaseRouteHeader_to_pjsip_route_hdr(self.route_header, &self._route_header, self._tdata.pool)
-        pjsip_msg_add_hdr(self._tdata.msg, <pjsip_hdr *> &self._route_header)
-        
         hdr = <pjsip_hdr *> (<pj_list *> &self._tdata.msg.hdr).next
         while hdr != &self._tdata.msg.hdr:
-            hdr_name = _pj_str_to_str(hdr.name)
-            if hdr_name in header_names:
-                raise ValueError("Cannot override %s header value in extra_headers" % _pj_str_to_bytes(hdr.name))
-
+            if _pj_str_to_str(hdr.name) in header_names:
+                raise ValueError("Cannot override %s header value in extra_headers" % _pj_str_to_str(hdr.name))
             if hdr.type == PJSIP_H_CONTACT:
                 contact_hdr = <pjsip_contact_hdr *> hdr
                 _dict_to_pjsip_param(contact_parameters, &contact_hdr.other_param, self._tdata.pool)
             elif hdr.type == PJSIP_H_CALL_ID:
                 cid_hdr = <pjsip_cid_hdr *> hdr
-                self._call_id = PJSTR(_pj_str_to_bytes(cid_hdr.id))
+                self._call_id = PJSTR(_pj_str_to_str(cid_hdr.id))
             elif hdr.type == PJSIP_H_CSEQ:
                 cseq_hdr = <pjsip_cseq_hdr *> hdr
                 self.cseq = cseq_hdr.cseq
@@ -169,13 +173,9 @@ cdef class Request:
             else:
                 pass
             hdr = <pjsip_hdr *> (<pj_list *> hdr).next
-
+        _BaseRouteHeader_to_pjsip_route_hdr(self.route_header, &self._route_header, self._tdata.pool)
+        pjsip_msg_add_hdr(self._tdata.msg, <pjsip_hdr *> &self._route_header)
         _add_headers_to_tdata(self._tdata, self.extra_headers)
-
-        #event_dict = dict(obj=self)
-        #_pjsip_msg_to_dict(self._tdata.msg, event_dict)
-        #print('Request dict %s' % event_dict)
-
         if self.credentials is not None:
             status = pjsip_auth_clt_init(&self._auth, ua._pjsip_endpoint._obj, self._tdata.pool, 0)
             if status != 0:
@@ -369,7 +369,7 @@ cdef class Request:
                     pjsip_endpt_cancel_timer(ua._pjsip_endpoint._obj, &self._timer)
                     self._timer_active = 0
                 _add_event("SIPRequestDidFail", dict(obj=self, code=self._tsx.status_code,
-                                                     reason=_pj_str_to_bytes(self._tsx.status_text)))
+                                                     reason=_pj_str_to_str(self._tsx.status_text)))
                 self.state = "TERMINATED"
                 _add_event("SIPRequestDidEnd", dict(obj=self))
             self._tsx.mod_data[ua._module.id] = NULL
@@ -432,7 +432,8 @@ cdef class IncomingRequest:
         if reason is None:
             self._tdata.msg.line.status.reason = pjsip_get_status_text(code)[0]
         else:
-            pj_strdup2_with_null(self._tdata.pool, &self._tdata.msg.line.status.reason, reason.encode())
+            reason_bytes = reason.encode()
+            pj_strdup2_with_null(self._tdata.pool, &self._tdata.msg.line.status.reason, reason_bytes)
         if extra_headers is not None:
             _add_headers_to_tdata(self._tdata, extra_headers)
         event_dict = dict(obj=self)

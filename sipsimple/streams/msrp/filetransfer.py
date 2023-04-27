@@ -5,7 +5,7 @@ This module provides classes to parse and generate SDP related to SIP sessions t
 
 __all__ = ['FileTransferStream', 'FileSelector']
 
-import pickle as pickle
+import cPickle as pickle
 import hashlib
 import mimetypes
 import os
@@ -13,7 +13,6 @@ import random
 import re
 import time
 import uuid
-import traceback
 
 from abc import ABCMeta, abstractmethod
 from application.notification import NotificationCenter, NotificationData, IObserver
@@ -21,12 +20,12 @@ from application.python.threadpool import ThreadPool, run_in_threadpool
 from application.python.types import MarkerType
 from application.system import FileExistsError, makedirs, openfile, unlink
 from itertools import count
-from msrplib.protocol import FailureReportHeader, SuccessReportHeader, ContentTypeHeader, IntegerHeaderType, MSRPNamedHeader, HeaderParsingError
+from msrplib.protocol import MSRPHeader, FailureReportHeader, SuccessReportHeader, ContentTypeHeader
 from msrplib.session import MSRPSession
 from msrplib.transport import make_response
-from queue import Queue
+from Queue import Queue
 from threading import Event, Lock
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.configuration.settings import SIPSimpleSettings
 from sipsimple.core import SDPAttribute
@@ -34,20 +33,18 @@ from sipsimple.storage import ISIPSimpleApplicationDataStorage
 from sipsimple.streams import InvalidStreamError, UnknownStreamError
 from sipsimple.streams.msrp import MSRPStreamBase
 from sipsimple.threading import run_in_twisted_thread, run_in_thread
-
-#sha1 is much faster on large file than python native implementation 
 from sipsimple.util import sha1
 
 
 HASH = type(hashlib.sha1())
 
 
-class RandomID(metaclass=MarkerType): pass
+class RandomID: __metaclass__ = MarkerType
 
 
 class FileSelectorHash(str):
-    _hash_re = re.compile(r'^sha-1(:[0-9A-F]{2}){20}$')
-    _byte_re = re.compile(r'..')
+    _hash_re = re.compile('^sha-1(:[0-9A-F]{2}){20}$')
+    _byte_re = re.compile('..')
 
     def __new__(cls, value):
         if isinstance(value, str):
@@ -70,7 +67,7 @@ class FileSelectorHash(str):
             return NotImplemented
 
     def __ne__(self, other):
-        return not self == other
+        return not (self == other)
 
     @classmethod
     def encode_hash(cls, hash_instance):
@@ -81,10 +78,10 @@ class FileSelectorHash(str):
 
 
 class FileSelector(object):
-    _name_re = re.compile(r'name:"([^"]+)"')
-    _size_re = re.compile(r'size:(\d+)')
-    _type_re = re.compile(r'type:([^ ]+)')
-    _hash_re = re.compile(r'hash:([^ ]+)')
+    _name_re = re.compile('name:"([^"]+)"')
+    _size_re = re.compile('size:(\d+)')
+    _type_re = re.compile('type:([^ ]+)')
+    _hash_re = re.compile('hash:([^ ]+)')
 
     def __init__(self, name=None, type=None, size=None, hash=None, fd=None):
         # If present, hash should be a sha1 object or a string in the form: sha-1:72:24:5F:E8:65:3D:DA:F3:71:36:2F:86:D4:71:91:3E:E4:A2:CE:2E
@@ -105,13 +102,11 @@ class FileSelector(object):
 
     @classmethod
     def parse(cls, string):
-        if isinstance(string, bytes):
-            string = string.decode()
         name_match = cls._name_re.search(string)
         size_match = cls._size_re.search(string)
         type_match = cls._type_re.search(string)
         hash_match = cls._hash_re.search(string)
-        name = name_match and name_match.group(1)
+        name = name_match and name_match.group(1).decode('utf-8')
         size = size_match and int(size_match.group(1))
         type = type_match and type_match.group(1)
         hash = hash_match and hash_match.group(1)
@@ -119,7 +114,7 @@ class FileSelector(object):
 
     @classmethod
     def for_file(cls, path, type=None, hash=None):
-        name = str(path)
+        name = unicode(path)
         fd = open(name, 'rb')
         size = os.fstat(fd.fileno()).st_size
         if type is None:
@@ -134,9 +129,8 @@ class FileSelector(object):
 
     @property
     def sdp_repr(self):
-        items = [('name', self.name and '"%s"' % os.path.basename(self.name)), ('type', self.type), ('size', self.size), ('hash', self.hash)]
-        sdp = ' '.join('%s:%s' % (name, value) for name, value in items if value is not None)
-        return sdp.encode()
+        items = [('name', self.name and '"%s"' % os.path.basename(self.name).encode('utf-8')), ('type', self.type), ('size', self.size), ('hash', self.hash)]
+        return ' '.join('%s:%s' % (name, value) for name, value in items if value is not None)
 
 
 class UniqueFilenameGenerator(object):
@@ -183,7 +177,7 @@ class FileTransfersMetadata(object):
             except Exception:
                 data = {}
             now = time.time()
-            for hash, entry in list(data.items()):
+            for hash, entry in data.items():
                 try:
                     mtime = os.path.getmtime(entry.filename)
                 except OSError:
@@ -211,8 +205,10 @@ class FileTransfersMetadata(object):
         self.lock.release()
 
 
-@implementer(IObserver)
-class FileTransferHandler(object, metaclass=ABCMeta):
+class FileTransferHandler(object):
+    __metaclass__ = ABCMeta
+
+    implements(IObserver)
 
     threadpool = ThreadPool(name='FileTransfers', min_threads=0, max_threads=100)
     threadpool.start()
@@ -307,12 +303,7 @@ class FileTransferHandler(object, metaclass=ABCMeta):
         self.__terminate()
 
 
-class OffsetHeader(MSRPNamedHeader):
-    name = 'Offset'
-    type = IntegerHeaderType
-
-
-class EndTransfer(metaclass=MarkerType): pass
+class EndTransfer: __metaclass__ = MarkerType
 
 
 class IncomingFileTransferHandler(FileTransferHandler):
@@ -358,8 +349,7 @@ class IncomingFileTransferHandler(FileTransferHandler):
                     self.offset = stream.file_selector.fd.tell()
                     self.hash = prev_file.partial_hash
                 except (KeyError, EnvironmentError, ValueError):
-                    file_path = stream.file_selector.name.decode() if isinstance(stream.file_selector.name, bytes) else stream.file_selector.name
-                    for name in UniqueFilenameGenerator.generate(os.path.join(directory, os.path.basename(file_path))):
+                    for name in UniqueFilenameGenerator.generate(os.path.join(directory, os.path.basename(stream.file_selector.name))):
                         try:
                             stream.file_selector.fd = openfile(name, 'xb')
                         except FileExistsError:
@@ -367,7 +357,7 @@ class IncomingFileTransferHandler(FileTransferHandler):
                         else:
                             stream.file_selector.name = name
                             break
-        except Exception as e:
+        except Exception, e:
             NotificationCenter().post_notification('FileTransferHandlerDidNotInitialize', sender=self, data=NotificationData(reason=str(e)))
         else:
             NotificationCenter().post_notification('FileTransferHandlerDidInitialize', sender=self)
@@ -377,7 +367,7 @@ class IncomingFileTransferHandler(FileTransferHandler):
 
     def process_chunk(self, chunk):
         if chunk.method == 'SEND':
-            if not self.received_chunks and chunk.byte_range.start == 1:
+            if not self.received_chunks and chunk.byte_range[0] == 1:
                 self.stream.file_selector.fd.truncate(0)
                 self.stream.file_selector.fd.seek(0)
                 self.hash = sha1()
@@ -390,7 +380,7 @@ class IncomingFileTransferHandler(FileTransferHandler):
             else:
                 offset = self.stream.file_selector.fd.tell()
                 response = make_response(chunk, 200, 'OK')
-                response.add_header(OffsetHeader(offset))
+                response.headers['Offset'] = MSRPHeader('Offset', offset)
             self.stream.msrp_session.send_chunk(response)
 
     @run_in_threadpool(FileTransferHandler.threadpool)
@@ -404,18 +394,17 @@ class IncomingFileTransferHandler(FileTransferHandler):
             chunk = self.queue.get()
             if chunk is EndTransfer:
                 break
-            data = chunk.data
             try:
-                fd.write(data)
-            except EnvironmentError as e:
+                fd.write(chunk.data)
+            except EnvironmentError, e:
                 fd.close()
                 notification_center.post_notification('FileTransferHandlerError', sender=self, data=NotificationData(error=str(e)))
                 notification_center.post_notification('FileTransferHandlerDidEnd', sender=self, data=NotificationData(error=True, reason=str(e)))
                 return
-            self.hash.update(data)
+            self.hash.update(chunk.data)
             self.offset += chunk.size
-            transferred_bytes = chunk.byte_range.start + chunk.size - 1
-            total_bytes = file_selector.size = chunk.byte_range.total
+            transferred_bytes = chunk.byte_range[0] + chunk.size - 1
+            total_bytes = file_selector.size = chunk.byte_range[2]
             notification_center.post_notification('FileTransferHandlerProgress', sender=self, data=NotificationData(transferred_bytes=transferred_bytes, total_bytes=total_bytes))
             if transferred_bytes == total_bytes:
                 break
@@ -464,6 +453,7 @@ class OutgoingFileTransferHandler(FileTransferHandler):
         self.file_offset_event = Event()
         self.message_id = '%x' % random.getrandbits(64)
         self.offset = 0
+        self.headers = {}
 
     def initialize(self, stream, session):
         super(OutgoingFileTransferHandler, self).initialize(stream, session)
@@ -473,6 +463,10 @@ class OutgoingFileTransferHandler(FileTransferHandler):
         if stream.file_selector.size == 0:
             NotificationCenter().post_notification('FileTransferHandlerDidNotInitialize', sender=self, data=NotificationData(reason='file is empty'))
             return
+
+        self.headers[ContentTypeHeader.name] = ContentTypeHeader(stream.file_selector.type)
+        self.headers[SuccessReportHeader.name] = SuccessReportHeader('yes')
+        self.headers[FailureReportHeader.name] = FailureReportHeader('yes')
 
         if stream.file_selector.hash is None:
             self._calculate_file_hash()
@@ -492,7 +486,7 @@ class OutgoingFileTransferHandler(FileTransferHandler):
         while not self.stop_event.is_set():
             try:
                 content = fd.read(self.file_part_size)
-            except EnvironmentError as e:
+            except EnvironmentError, e:
                 fd.close()
                 notification_center.post_notification('FileTransferHandlerDidNotInitialize', sender=self, data=NotificationData(reason=str(e)))
                 return
@@ -529,7 +523,7 @@ class OutgoingFileTransferHandler(FileTransferHandler):
             while not self.stop_event.is_set():
                 try:
                     data = fd.read(self.file_part_size)
-                except EnvironmentError as e:
+                except EnvironmentError, e:
                     failure_reason = str(e)
                     break
                 if not data:
@@ -567,13 +561,10 @@ class OutgoingFileTransferHandler(FileTransferHandler):
                                                    start=self.offset+1,
                                                    end=self.offset+data_len,
                                                    length=self.stream.file_selector.size)
-        chunk.add_header(ContentTypeHeader(self.stream.file_selector.type))
-        chunk.add_header(SuccessReportHeader('yes'))
-        chunk.add_header(FailureReportHeader('yes'))
-
+        chunk.headers.update(self.headers)
         try:
             self.stream.msrp_session.send_chunk(chunk, response_cb=self._on_transaction_response)
-        except Exception as e:
+        except Exception, e:
             NotificationCenter().post_notification('FileTransferHandlerError', sender=self, data=NotificationData(error=str(e)))
         else:
             self.offset += data_len
@@ -583,8 +574,8 @@ class OutgoingFileTransferHandler(FileTransferHandler):
         def response_cb(response):
             if not self.stop_event.is_set() and response.code == 200:
                 try:
-                    offset = response.headers['Offset'].decoded
-                except (KeyError, HeaderParsingError):
+                    offset = int(response.headers['Offset'].decoded)
+                except (KeyError, ValueError):
                     offset = 0
                 self.offset = offset
             self.file_offset_event.set()
@@ -593,18 +584,18 @@ class OutgoingFileTransferHandler(FileTransferHandler):
             self.file_offset_event.set()
             return
 
-        chunk = self.stream.msrp.make_request('FILE_OFFSET')  # TODO: _ is illegal in MSRP method names according to RFC 4975
+        chunk = self.stream.msrp.make_request('FILE_OFFSET')
         try:
             self.stream.msrp_session.send_chunk(chunk, response_cb=response_cb)
-        except Exception as e:
+        except Exception, e:
             NotificationCenter().post_notification('FileTransferHandlerError', sender=self, data=NotificationData(error=str(e)))
 
     def process_chunk(self, chunk):
         # here we process the REPORT chunks
         notification_center = NotificationCenter()
         if chunk.status.code == 200:
-            transferred_bytes = chunk.byte_range.end
-            total_bytes = chunk.byte_range.total
+            transferred_bytes = chunk.byte_range[1]
+            total_bytes = chunk.byte_range[2]
             notification_center.post_notification('FileTransferHandlerProgress', sender=self, data=NotificationData(transferred_bytes=transferred_bytes, total_bytes=total_bytes))
             if transferred_bytes == total_bytes:
                 self.finished_event.set()
@@ -645,40 +636,25 @@ class FileTransferStream(MSRPStreamBase):
     @classmethod
     def new_from_sdp(cls, session, remote_sdp, stream_index):
         remote_stream = remote_sdp.media[stream_index]
-
-        if remote_stream.media != b'message':
+        if remote_stream.media != 'message' or 'file-selector' not in remote_stream.attributes:
             raise UnknownStreamError
-
-        if  b'file-selector' not in remote_stream.attributes:
-            raise UnknownStreamError
-
         expected_transport = 'TCP/TLS/MSRP' if session.account.msrp.transport == 'tls' else 'TCP/MSRP'
-        if remote_stream.transport != expected_transport.encode():
+        if remote_stream.transport != expected_transport:
             raise InvalidStreamError("expected %s transport in file transfer stream, got %s" % (expected_transport, remote_stream.transport))
-
-        if remote_stream.formats != [b'*']:
+        if remote_stream.formats != ['*']:
             raise InvalidStreamError("wrong format list specified")
-            
-        file_selector_attr = remote_stream.attributes.getfirst(b'file-selector')
         try:
-            file_selector = FileSelector.parse(file_selector_attr)
+            file_selector = FileSelector.parse(remote_stream.attributes.getfirst('file-selector'))
         except Exception as e:
             raise InvalidStreamError("error parsing file-selector: {}".format(e))
-
-        transfer_id = remote_stream.attributes.getfirst(b'file-transfer-id', None)
-        transfer_id = transfer_id.decode() if transfer_id else None
-        
-        try:
-            if remote_stream.direction == b'sendonly':
-                stream = cls(file_selector, 'recvonly', transfer_id)
-            elif remote_stream.direction == b'recvonly':
-                stream = cls(file_selector, 'sendonly', transfer_id)
-            else:
-                raise InvalidStreamError("wrong stream direction specified")
-        except Exception as e:
-             traceback.print_exc()
-             return None
-        stream.remote_role = remote_stream.attributes.getfirst(b'setup', b'active')
+        transfer_id = remote_stream.attributes.getfirst('file-transfer-id', None)
+        if remote_stream.direction == 'sendonly':
+            stream = cls(file_selector, 'recvonly', transfer_id)
+        elif remote_stream.direction == 'recvonly':
+            stream = cls(file_selector, 'sendonly', transfer_id)
+        else:
+            raise InvalidStreamError("wrong stream direction specified")
+        stream.remote_role = remote_stream.attributes.getfirst('setup', 'active')
         return stream
 
     def initialize(self, session, direction):
@@ -688,16 +664,16 @@ class FileTransferStream(MSRPStreamBase):
 
     def _create_local_media(self, uri_path):
         local_media = super(FileTransferStream, self)._create_local_media(uri_path)
-        local_media.attributes.append(SDPAttribute(b'file-selector', self.file_selector.sdp_repr))
-        local_media.attributes.append(SDPAttribute(b'x-file-offset', b''))
+        local_media.attributes.append(SDPAttribute('file-selector', self.file_selector.sdp_repr))
+        local_media.attributes.append(SDPAttribute('x-file-offset', ''))
         if self.transfer_id is not None:
-            local_media.attributes.append(SDPAttribute(b'file-transfer-id', self.transfer_id.encode()))
+            local_media.attributes.append(SDPAttribute('file-transfer-id', self.transfer_id))
         return local_media
 
     @property
     def file_offset_supported(self):
         try:
-            return b'x-file-offset' in self.remote_media.attributes
+            return 'x-file-offset' in self.remote_media.attributes
         except AttributeError:
             return False
 
@@ -723,10 +699,7 @@ class FileTransferStream(MSRPStreamBase):
         notification.center.remove_observer(self, sender=self.handler)
 
     def _NH_MediaStreamWillEnd(self, notification):
-        try:
-            notification.center.remove_observer(self, sender=self.handler)
-        except KeyError:
-            pass
+        notification.center.remove_observer(self, sender=self.handler)
 
     def _handle_REPORT(self, chunk):
         # in theory, REPORT can come with Byte-Range which would limit the scope of the REPORT to the part of the message.

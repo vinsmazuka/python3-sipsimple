@@ -9,10 +9,9 @@ from time import time
 
 from application.notification import IObserver, NotificationCenter, NotificationData
 from application.python import Null, limit
-from application.system import host as Host
 from eventlib import coros, proc
 from twisted.internet import reactor
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core import ContactHeader, FromHeader, Header, Registration, RouteHeader, SIPURI, SIPCoreError, NoGRUU
 from sipsimple.configuration.settings import SIPSimpleSettings
@@ -40,8 +39,8 @@ class RegistrationError(Exception):
         self.refresh_interval = refresh_interval
 
 
-@implementer(IObserver)
 class Registrar(object):
+    implements(IObserver)
 
     def __init__(self, account):
         self.account = account
@@ -102,7 +101,6 @@ class Registrar(object):
     def _run(self):
         while True:
             command = self._command_channel.wait()
-            #print('Registrar for %s got command %s' % (self.account.id, command.name))
             handler = getattr(self, '_CH_%s' % command.name)
             handler(command)
 
@@ -114,26 +112,16 @@ class Registrar(object):
             self._registration_timer.cancel()
         self._registration_timer = None
 
+        # Initialize the registration
+        if self._registration is None:
+            duration = command.refresh_interval or self.account.sip.register_interval
+            self._registration = Registration(FromHeader(self.account.uri, self.account.display_name), credentials=self.account.credentials, duration=duration, extra_headers=[Header('Supported', 'gruu')])
+            notification_center.add_observer(self, sender=self._registration)
+            notification_center.post_notification('SIPAccountWillRegister', sender=self.account)
+        else:
+            notification_center.post_notification('SIPAccountRegistrationWillRefresh', sender=self.account)
+
         try:
-            if Host.default_ip is None:
-                raise RegistrationError('No IP address', retry_after=60)
-
-            # Initialize the registration
-            if self._registration is None:
-                duration = command.refresh_interval or self.account.sip.register_interval
-                try:
-                    self._registration = Registration(FromHeader(self.account.uri, self.account.display_name), 
-                                                  credentials=self.account.credentials, 
-                                                  duration=duration,
-                                                  extra_headers=[Header('Supported', 'gruu')])
-                except Exception as e:
-                    raise RegistrationError('Cannot create registration: %s' % str(e), retry_after=120)
-
-                notification_center.add_observer(self, sender=self._registration)
-                notification_center.post_notification('SIPAccountWillRegister', sender=self.account)
-            else:
-                notification_center.post_notification('SIPAccountRegistrationWillRefresh', sender=self.account)
-
             # Lookup routes
             if self.account.sip.outbound_proxy is not None and self.account.sip.outbound_proxy.transport in settings.sip.transport_list:
                 uri = SIPURI(host=self.account.sip.outbound_proxy.host, port=self.account.sip.outbound_proxy.port, parameters={'transport': self.account.sip.outbound_proxy.transport})
@@ -141,9 +129,9 @@ class Registrar(object):
                 uri = SIPURI(host=self.account.id.domain)
             lookup = DNSLookup()
             try:
-                routes = lookup.lookup_sip_proxy(uri, settings.sip.transport_list, tls_name=self.account.sip.tls_name).wait()
-            except DNSLookupError as e:
-                retry_after = int(random.uniform(self._dns_wait, 2*self._dns_wait))
+                routes = lookup.lookup_sip_proxy(uri, settings.sip.transport_list).wait()
+            except DNSLookupError, e:
+                retry_after = random.uniform(self._dns_wait, 2*self._dns_wait)
                 self._dns_wait = limit(2*self._dns_wait, max=30)
                 raise RegistrationError('DNS lookup failed: %s' % e, retry_after=retry_after)
             else:
@@ -151,9 +139,7 @@ class Registrar(object):
 
             # Register by trying each route in turn
             register_timeout = time() + 30
-            i = 0
             for route in routes:
-                i += 1
                 remaining_time = register_timeout-time()
                 if remaining_time > 0:
                     try:
@@ -161,11 +147,9 @@ class Registrar(object):
                     except KeyError:
                         continue
                     contact_header = ContactHeader(contact_uri)
-                    instance_id = '"<%s>"' % settings.instance_id
-                    
-                    contact_header.parameters[b"+sip.instance"] = instance_id.encode()
+                    contact_header.parameters['+sip.instance'] = '"<%s>"' % settings.instance_id
                     if self.account.nat_traversal.use_ice:
-                        contact_header.parameters[b"+sip.ice"] = None
+                        contact_header.parameters['+sip.ice'] = None
                     route_header = RouteHeader(route.uri)
                     try:
                         self._registration.register(contact_header, route_header, timeout=limit(remaining_time, min=1, max=10))
@@ -177,29 +161,23 @@ class Registrar(object):
                             if notification.name == 'SIPRegistrationDidSucceed':
                                 break
                             if notification.name == 'SIPRegistrationDidEnd':
-                                raise RegistrationError('Registration expired', retry_after=int(random.uniform(60, 120)))  # registration expired while we were trying to re-register
-                    except SIPRegistrationDidFail as e:
+                                raise RegistrationError('Registration expired', retry_after=0)  # registration expired while we were trying to re-register
+                    except SIPRegistrationDidFail, e:
                         notification_data = NotificationData(code=e.data.code, reason=e.data.reason, registration=self._registration, registrar=route)
                         notification_center.post_notification('SIPAccountRegistrationGotAnswer', sender=self.account, data=notification_data)
                         if e.data.code == 401:
                             # Authentication failed, so retry the registration in some time
-                            raise RegistrationError('Authentication failed', retry_after=int(random.uniform(60, 120)))
-                        elif e.data.code == 408:
-                            # Timeout
-                            raise RegistrationError('Request timeout', retry_after=int(random.uniform(15, 40)))
+                            raise RegistrationError('Authentication failed', retry_after=random.uniform(60, 120))
                         elif e.data.code == 423:
                             # Get the value of the Min-Expires header
                             if e.data.min_expires is not None and e.data.min_expires > self.account.sip.register_interval:
                                 refresh_interval = e.data.min_expires
                             else:
                                 refresh_interval = None
-                            raise RegistrationError('Interval too short', retry_after=int(random.uniform(60, 120)), refresh_interval=refresh_interval)
+                            raise RegistrationError('Interval too short', retry_after=random.uniform(60, 120), refresh_interval=refresh_interval)
                         else:
-                            if i == len(routes):
-                                raise RegistrationError(e.data.reason, retry_after=int(random.uniform(15, 40)))
-                            else:
-                                # Otherwise just try the next route
-                                continue
+                            # Otherwise just try the next route
+                            continue
                     else:
                         notification_data = NotificationData(code=notification.data.code, reason=notification.data.reason, registration=self._registration, registrar=route)
                         notification_center.post_notification('SIPAccountRegistrationGotAnswer', sender=self.account, data=notification_data)
@@ -230,18 +208,18 @@ class Registrar(object):
                         break
             else:
                 # There are no more routes to try, reschedule the registration
-                retry_after = int(random.uniform(self._register_wait, 2*self._register_wait))
+                retry_after = random.uniform(self._register_wait, 2*self._register_wait)
                 self._register_wait = limit(self._register_wait*2, max=30)
                 raise RegistrationError('No more routes to try', retry_after=retry_after)
-        except RegistrationError as e:
+        except RegistrationError, e:
             self.registered = False
-            notification_center.discard_observer(self, sender=self._registration)
+            notification_center.remove_observer(self, sender=self._registration)
             notification_center.post_notification('SIPAccountRegistrationDidFail', sender=self.account, data=NotificationData(error=e.error, retry_after=e.retry_after))
-            def register(e):
+            def register():
                 if self.active:
                     self._command_channel.send(Command('register', command.event, refresh_interval=e.refresh_interval))
                 self._registration_timer = None
-            self._registration_timer = reactor.callLater(e.retry_after, register, e)
+            self._registration_timer = reactor.callLater(e.retry_after, register)
             self._registration = None
             self.account.contact.public_gruu = None
             self.account.contact.temporary_gruu = None
@@ -262,7 +240,7 @@ class Registrar(object):
                         notification = self._data_channel.wait()
                         if notification.name == 'SIPRegistrationDidEnd':
                             break
-                except (SIPRegistrationDidFail, SIPRegistrationDidNotEnd) as e:
+                except (SIPRegistrationDidFail, SIPRegistrationDidNotEnd), e:
                     notification_center.post_notification('SIPAccountRegistrationDidNotEnd', sender=self.account, data=NotificationData(code=e.data.code, reason=e.data.reason,
                                                                                                                                         registration=self._registration))
                 else:

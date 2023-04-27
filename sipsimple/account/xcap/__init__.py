@@ -5,28 +5,28 @@ __all__ = ['Group', 'Contact', 'ContactURI', 'EventHandling', 'Policy', 'Icon', 
 
 
 import base64
-import pickle
+import cPickle
 import os
 import random
 import socket
 import weakref
-import gevent
 
-from io import StringIO
+from cStringIO import StringIO
 from collections import OrderedDict
 from datetime import datetime
 from itertools import chain
 from operator import attrgetter
-from urllib.error import URLError
+from urllib2 import URLError
 
 from application.notification import IObserver, NotificationCenter, NotificationData
 from application.python import Null
+from application.python.decorator import execute_once
 from eventlib import api, coros, proc
 from eventlib.green.httplib import BadStatusLine
 from twisted.internet.error import ConnectionLost
-from xcaplib.client import XCAPClient
+from xcaplib.green import XCAPClient
 from xcaplib.error import HTTPError
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple import log
 from sipsimple.account.subscription import Subscriber, Content
@@ -38,9 +38,9 @@ from sipsimple.payloads import ParserError, IterateTypes, IterateIDs, IterateIte
 from sipsimple.payloads import addressbook, commonpolicy, dialogrules, omapolicy, pidf, prescontent, presrules, resourcelists, rlsservices, xcapcaps, xcapdiff
 from sipsimple.payloads import rpid; del rpid  # needs to be imported to register its namespace
 from sipsimple.threading import run_in_twisted_thread
-from sipsimple.threading.green import Command, run_in_green_thread
+from sipsimple.threading.green import Command, Worker, run_in_green_thread
 
-import traceback
+
 
 class XCAPError(Exception): pass
 class FetchRequiredError(XCAPError): pass
@@ -64,7 +64,7 @@ class Document(object):
         self.dirty = False
         self.supported = False
 
-    def __bool__(self):
+    def __nonzero__(self):
         return self.content is not None
 
     @property
@@ -89,8 +89,7 @@ class Document(object):
         if not self.cached:
             return
         try:
-            doc_io = self.manager.storage.load(self.name)
-            document = StringIO(doc_io.decode())
+            document = StringIO(self.manager.storage.load(self.name))
             self.etag = document.readline().strip() or None
             self.content = self.payload_type.parse(document)
             self.__dict__['dirty'] = False
@@ -116,101 +115,60 @@ class Document(object):
         self.dirty = False
 
     def fetch(self):
-        notification_center = NotificationCenter()
-
         try:
-            notification_data = NotificationData(method='GET', url=self.url, application=self.application, etag=self.etag, result='fetch')
-            notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
             document = self.manager.client.get(self.application, etagnot=self.etag, globaltree=self.global_tree, headers={'Accept': self.payload_type.content_type}, filename=self.filename)
             self.content = self.payload_type.parse(document)
             self.etag = document.etag
             self.__dict__['dirty'] = False
-        except (BadStatusLine, ConnectionLost, URLError, TimeoutError, socket.error) as e:
-            notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='failure', reason=str(e), code=408, etag=self.etag)
-            notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
+        except (BadStatusLine, ConnectionLost, URLError, socket.error), e:
             raise XCAPError("failed to fetch %s document: %s" % (self.name, e))
-        except HTTPError as e:
+        except HTTPError, e:
             if e.status == 404: # Not Found
                 if self.content is not None:
                     self.reset()
                     self.fetch_time = datetime.utcnow()
-            elif e.status == 401:
-                notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='failure', reason=str(e), code=e.status, etag=self.etag)
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
-                raise XCAPError("failed to fetch %s document: auth failed (401)" % self.name)
             elif e.status != 304: # Other than Not Modified:
-                notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='failure', reason=str(e), code=e.status, etag=self.etag)
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
                 raise XCAPError("failed to fetch %s document: %s" % (self.name, e))
-            elif e.status == 304:
-                notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='success', reason='not_modified', code=304, etag=self.etag)
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
-        except ParserError as e:
-            notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='failure', reason=str(e), code=500, etag=self.etag)
-            notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
+        except ParserError, e:
             raise XCAPError("failed to parse %s document: %s" % (self.name, e))
         else:
             self.fetch_time = datetime.utcnow()
-            notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='success', reason='changed', code=200, etag=self.etag, size=len(document))
-            notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
-
             if self.cached:
                 try:
-                    data = self.etag + os.linesep
-                    data += document.decode() if isinstance(document, bytes) else document
-                    self.manager.storage.save(self.name, data)
-                except XCAPStorageError as e:
-                    notification_data = NotificationData(method='GET', url=self.url, application=self.application, result='failed', reason='storage failure: %s' % str(e), code=500, etag=self.etag, size=len(document))
-                    notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
+                    self.manager.storage.save(self.name, self.etag + os.linesep + document)
+                except XCAPStorageError:
+                    pass
 
     def update(self):
         if not self.dirty:
             return
-
-        notification_center = NotificationCenter()
         data = self.content.toxml() if self.content is not None else None
-        method = 'PUT' if data is not None else 'DELETE'
-
         try:
             kw = dict(etag=self.etag) if self.etag is not None else dict(etagnot='*')
             if data is not None:
                 response = self.manager.client.put(self.application, data, globaltree=self.global_tree, filename=self.filename, headers={'Content-Type': self.payload_type.content_type}, **kw)
             else:
                 response = self.manager.client.delete(self.application, data, globaltree=self.global_tree, filename=self.filename, **kw)
-        except (BadStatusLine, ConnectionLost, URLError) as e:
-            notification_data = NotificationData(method=method, url=self.url, application=self.application, result='failure', reason=str(e), code=408, etag=self.etag)
-            notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
+        except (BadStatusLine, ConnectionLost, URLError), e:
             raise XCAPError("failed to update %s document: %s" % (self.name, e))
-        except HTTPError as e:
+        except HTTPError, e:
             if e.status == 412: # Precondition Failed
-                notification_data = NotificationData(method=method, url=self.url, application=self.application, result='failure', reason='document modified by others', code=e.status, etag=self.etag)
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
                 raise FetchRequiredError("document %s was modified externally" % self.name)
             elif e.status == 404 and data is None: # attempted to delete a document that did't exist in the first place
-                notification_data = NotificationData(method=method, url=self.url, application=self.application, result='failure', reason='non-existent document', code=e.status, etag=self.etag)
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
+                pass
             else:
-                notification_data = NotificationData(method=method, url=self.url, application=self.application, result='failure', reason=str(e), code=e.status, etag=self.etag)
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
                 raise XCAPError("failed to update %s document: %s" % (self.name, e))
-
         self.etag = response.etag if data is not None else None
-        notification_data = NotificationData(method=method, url=self.url, application=self.application, result='success', reason='changed', code=200, etag=self.etag, size=len(data) if data else 0)
-        notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
-
         self.dirty = False
         self.update_time = datetime.utcnow()
         if self.cached:
             try:
                 if data is not None:
-                    document = self.etag + os.linesep
-                    document += data.decode() if isinstance(data, bytes) else data
-                    self.manager.storage.save(self.name, document)
+                    self.manager.storage.save(self.name, self.etag + os.linesep + data)
                 else:
                     self.manager.storage.delete(self.name)
-            except XCAPStorageError as e:
-                notification_data = NotificationData(method=method, url=self.url, application=self.application, result='failed', reason='storage failure: %s' % str(e), code=500, etag=self.etag, size=len(data))
-                notification_center.post_notification('XCAPTrace', sender=self, data=notification_data)
+            except XCAPStorageError:
+                pass
 
 
 class DialogRulesDocument(Document):
@@ -350,7 +308,7 @@ class ItemCollection(object):
     def __contains__(self, key):
         return key in self.items
     def __iter__(self):
-        return iter(list(self.items.values()))
+        return self.items.itervalues()
     def __reversed__(self):
         return (self[id] for id in reversed(self.items))
     def __len__(self):
@@ -363,11 +321,11 @@ class ItemCollection(object):
         equal = self.__eq__(other)
         return NotImplemented if equal is NotImplemented else not equal
     def __repr__(self):
-        return "%s(%r)" % (self.__class__.__name__, list(self.items.values()))
+        return "%s(%r)" % (self.__class__.__name__, self.items.values())
     def ids(self):
-        return list(self.items.keys())
+        return self.items.keys()
     def iterids(self):
-        return iter(list(self.items.keys()))
+        return self.items.iterkeys()
     def get(self, key, default=None):
         return self.items.get(key, default)
     def add(self, item):
@@ -391,7 +349,7 @@ class ContactURIList(ItemCollection):
         return NotImplemented
 
     def __repr__(self):
-        return "%s(%r, default=%r)" % (self.__class__.__name__, list(self.items.values()), self.default)
+        return "%s(%r, default=%r)" % (self.__class__.__name__, self.items.values(), self.default)
 
 
 class Group(object):
@@ -598,9 +556,8 @@ class Icon(object):
     @classmethod
     def from_payload(cls, payload):
         try:
-            base64_bytes = payload.data.value.encode('ascii')
-            data = base64.b64decode(base64_bytes)
-        except Exception as e:
+            data = base64.decodestring(payload.data.value)
+        except Exception:
             return None
         else:
             description = payload.description.value if payload.description else None
@@ -637,7 +594,7 @@ class OfflineStatus(object):
 class Operation(object):
     __params__ = ()
     def __init__(self, **params):
-        for name, value in list(params.items()):
+        for name, value in params.iteritems():
             setattr(self, name, value)
         for param in set(self.__params__).difference(params):
             raise ValueError("missing operation parameter: '%s'" % param)
@@ -718,8 +675,8 @@ class XCAPSubscriber(Subscriber):
         return Content(resourcelists.ResourceLists([rlist]).toxml(), resourcelists.ResourceListsDocument.content_type)
 
 
-@implementer(IObserver)
 class XCAPManager(object):
+    implements(IObserver)
 
     def __init__(self, account):
         from sipsimple.application import SIPApplication
@@ -750,9 +707,8 @@ class XCAPManager(object):
         self.rls_services = RLSServicesDocument(self)
         self.status_icon = StatusIconDocument(self)
 
-        if self.account.enabled and self.account.xcap.enabled:
-            for document in self.documents:
-                document.load_from_cache()
+        for document in self.documents:
+            document.load_from_cache()
 
         try:
             journal = self.storage.load('journal')
@@ -760,7 +716,7 @@ class XCAPManager(object):
             self.journal = []
         else:
             try:
-                self.journal = pickle.loads(journal)
+                self.journal = cPickle.loads(journal)
             except Exception:
                 self.journal = []
 
@@ -803,7 +759,7 @@ class XCAPManager(object):
     def rls_dialog_uri(self):
         return SIPAddress('%s+dialog@%s' % (self.account.id.username, self.account.id.domain))
 
-    @run_in_green_thread
+    @execute_once
     def init(self):
         """
         Initializes the XCAP manager before it can be started. Needs to be
@@ -811,7 +767,6 @@ class XCAPManager(object):
         """
         self.command_proc = proc.spawn(self._run)
 
-    @run_in_green_thread
     def start(self):
         """
         Starts the XCAP manager. This method needs to be called in a green
@@ -821,7 +776,6 @@ class XCAPManager(object):
         self.command_channel.send(command)
         command.wait()
 
-    @run_in_green_thread
     def stop(self):
         """
         Stops the XCAP manager. This method blocks until all the operations are
@@ -848,18 +802,12 @@ class XCAPManager(object):
             self.command_channel.send(Command('update'))
 
     def add_contact(self, contact):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerDidAddContact', sender=self, data=NotificationData(contact=contact))
         self._schedule_operation(AddContactOperation(contact=contact))
 
     def update_contact(self, contact, attributes):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerDidUpdateContact', sender=self, data=NotificationData(contact=contact))
         self._schedule_operation(UpdateContactOperation(contact=contact, attributes=attributes))
 
     def remove_contact(self, contact):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerDidRemoveContact', sender=self, data=NotificationData(contact=contact))
         self._schedule_operation(RemoveContactOperation(contact=contact))
 
     def add_contact_uri(self, contact, uri):
@@ -872,28 +820,18 @@ class XCAPManager(object):
         self._schedule_operation(RemoveContactURIOperation(contact=contact, uri=uri))
 
     def add_group(self, group):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerDidAddGroup', sender=self, data=NotificationData(group=group))
         self._schedule_operation(AddGroupOperation(group=group))
 
     def update_group(self, group, attributes):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerDidUpdateGroup', sender=self, data=NotificationData(group=group))
         self._schedule_operation(UpdateGroupOperation(group=group, attributes=attributes))
 
     def remove_group(self, group):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerDidRemoveGroup', sender=self, data=NotificationData(group=group))
         self._schedule_operation(RemoveGroupOperation(group=group))
 
     def add_group_member(self, group, contact):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManageDidAddGroupMember', sender=self, data=NotificationData(group=group, contact=contact))
         self._schedule_operation(AddGroupMemberOperation(group=group, contact=contact))
 
     def remove_group_member(self, group, contact):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManageDidRemoveGroupMember', sender=self, data=NotificationData(group=group, contact=contact))
         self._schedule_operation(RemoveGroupMemberOperation(group=group, contact=contact))
 
     def add_policy(self, policy):
@@ -942,13 +880,12 @@ class XCAPManager(object):
             command.signal()
             return
         self.state = 'initializing'
+        self.xcap_subscriber = XCAPSubscriber(self.account)
         notification_center = NotificationCenter()
         notification_center.post_notification('XCAPManagerWillStart', sender=self)
-        notification_center.add_observer(self, sender=SIPSimpleSettings(), name='CFGSettingsObjectDidChange')
-        self.xcap_subscriber = XCAPSubscriber(self.account)
         notification_center.add_observer(self, sender=self.xcap_subscriber)
-        if self.account.xcap.xcap_diff:
-            self.xcap_subscriber.start()
+        notification_center.add_observer(self, sender=SIPSimpleSettings(), name='CFGSettingsObjectDidChange')
+        self.xcap_subscriber.start()
         self.command_channel.send(Command('initialize'))
         notification_center.post_notification('XCAPManagerDidStart', sender=self)
         command.signal()
@@ -986,34 +923,25 @@ class XCAPManager(object):
         raise proc.ProcExit
 
     def _CH_initialize(self, command):
-        notification_center = NotificationCenter()
-        notification_center.post_notification('XCAPManagerClientWillInitialize', sender=self, data=NotificationData(root=self.account.xcap.xcap_root))
         self.state = 'initializing'
         if self.timer is not None and self.timer.active():
             self.timer.cancel()
         self.timer = None
-        
-        xcap_root = self.account.xcap.xcap_root
-
         if self.account.xcap.xcap_root:
             self.client = XCAPClient(self.account.xcap.xcap_root, self.account.id, password=self.account.auth.password)
         else:
             try:
                 lookup = DNSLookup()
                 xcap_root = random.choice(lookup.lookup_xcap_server(self.account.uri).wait())
-            except DNSLookupError as e:
-                notification_center.post_notification('XCAPManagerClientDidNotInitialize', sender=self, data=NotificationData(error=str(e)))
+            except DNSLookupError:
                 self.timer = self._schedule_command(60,  Command('initialize', command.event))
                 return
             else:
                 self.client = XCAPClient(xcap_root, self.account.id, password=self.account.auth.password)
 
-        notification_center.post_notification('XCAPManagerClientDidInitialize', sender=self, data=NotificationData(client=self.client, root=xcap_root))
-
         try:
             self.server_caps.fetch()
-        except XCAPError as e:
-            notification_center.post_notification('XCAPManagerClientError', sender=self, data=NotificationData(client=self.client, context='xcap-caps', error=str(e)))
+        except XCAPError:
             self.timer = self._schedule_command(60,  Command('initialize', command.event))
             return
         else:
@@ -1025,11 +953,11 @@ class XCAPManager(object):
                 # Server must support at least resource-lists, rls-services and org.openmobilealliance.pres-rules
                 self.timer = self._schedule_command(3600,  Command('initialize', command.event))
                 return
-
         self.server_caps.initialize()
         for document in self.documents:
             document.initialize(self.server_caps.content)
 
+        notification_center = NotificationCenter()
         notification_center.post_notification('XCAPManagerDidDiscoverServerCapabilities', sender=self, data=NotificationData(auids=self.server_caps.content.auids))
 
         self.state = 'fetching'
@@ -1058,8 +986,7 @@ class XCAPManager(object):
             self.state = 'initializing'
             self.command_channel.send(Command('initialize'))
         else:
-            if self.account.xcap.xcap_diff:
-                self.xcap_subscriber.resubscribe()
+            self.xcap_subscriber.resubscribe()
         command.signal()
 
     def _CH_fetch(self, command):
@@ -1681,18 +1608,14 @@ class XCAPManager(object):
     def _OH_SetStatusIconOperation(self, operation):
         if not self.status_icon.supported:
             return
-
         icon = operation.icon
         if icon is None or not icon.data:
             self.status_icon.dirty = self.status_icon.content is not None
             self.status_icon.content = None
         else:
-            icon_bytes = icon.data
-            data = base64.b64encode(icon_bytes).decode('utf-8')
-            content = prescontent.PresenceContent(data=data, mime_type=icon.mime_type, encoding='base64', description=icon.description)
-            if self.status_icon.content and content and self.status_icon.content.data == content.data:
+            content = prescontent.PresenceContent(data=base64.encodestring(icon.data), mime_type=icon.mime_type, encoding='base64', description=icon.description)
+            if self.status_icon.content == content:
                 return
-
             self.status_icon.content = content
 
     def _OH_SetOfflineStatusOperation(self, operation):
@@ -1751,18 +1674,10 @@ class XCAPManager(object):
         if 'enabled' in notification.data.modified:
             return  # global account activation is handled separately by the account itself
         if self.account.enabled and 'xcap.enabled' in notification.data.modified:
-            if self.account.enabled and self.account.xcap.enabled:
-                for document in self.documents:
-                    document.load_from_cache()
-
+            if self.account.xcap.enabled:
                 self.start()
             else:
                 self.stop()
-        if self.account.enabled and 'xcap_diff' in notification.data.modified:
-            if self.account.xcap.xcap_diff:
-                self.xcap_subscriber.start()
-            else:
-                self.xcap_subscriber.stop()
 
     def _NH_CFGSettingsObjectWasDeleted(self, notification):
         notification.center.remove_observer(self, sender=self.account, name='CFGSettingsObjectDidChange')
@@ -1779,42 +1694,13 @@ class XCAPManager(object):
     def _NH_XCAPSubscriptionGotNotify(self, notification):
         if notification.data.content_type == xcapdiff.XCAPDiffDocument.content_type:
             try:
-                xcap_diff = xcapdiff.XCAPDiffDocument.parse(notification.data.body.decode())
-            except ParserError as e:
-                import traceback
-                traceback.print_exc()
-                notification_center = NotificationCenter()
-                notification_data = NotificationData(root=self.xcap_root, documents=['all'])
-                notification_center.post_notification('XCAPDocumentsDidChange', sender=self, data=notification_data)
+                xcap_diff = xcapdiff.XCAPDiffDocument.parse(notification.data.body)
+            except ParserError:
                 self.command_channel.send(Command('fetch', documents=set(self.document_names)))
             else:
-                changed_etags = {}
-                for child in xcap_diff:
-                    if isinstance(child, xcapdiff.Document):
-                        try:
-                            document = next(document for document in self.documents if document.application == child.selector.auid)
-                        except StopIteration:
-                            name = child.selector.auid
-                            url = child.selector.auid
-                        else:
-                            name = document.name
-                            url = document.url
-                    
-                        changed_etags[name] = {'new_etag': child.new_etag, 
-                                                   'previous_etag': child.previous_etag,
-                                                   'auid': child.selector.auid,
-                                                   'url': url
-                                                   }
-
                 applications = set(child.selector.auid for child in xcap_diff if isinstance(child, xcapdiff.Document))
-                documents = set(document.name for document in self.documents if document.application in applications and document.etag != changed_etags[name]['new_etag'])
-
-                if documents:
-                    self.command_channel.send(Command('fetch', documents=documents))
-
-                notification_center = NotificationCenter()
-                notification_data = NotificationData(root=self.xcap_root, documents=documents, notified_etags=changed_etags)
-                notification_center.post_notification('XCAPDocumentsDidChange', sender=self, data=notification_data)
+                documents = set(document.name for document in self.documents if document.application in applications)
+                self.command_channel.send(Command('fetch', documents=documents))
 
     def _load_data(self):
         addressbook = Addressbook.from_payload(self.resource_lists.content['sipsimple_addressbook'])
@@ -1829,9 +1715,8 @@ class XCAPManager(object):
 
         if self.status_icon.supported and self.status_icon.content:
             status_icon = Icon.from_payload(self.status_icon.content)
-            if status_icon:
-                status_icon.url = self.status_icon.url
-                status_icon.etag = self.status_icon.etag
+            status_icon.url = self.status_icon.url
+            status_icon.etag = self.status_icon.etag
         else:
             status_icon = None
 
@@ -1844,12 +1729,18 @@ class XCAPManager(object):
         NotificationCenter().post_notification('XCAPManagerDidReloadData', sender=self, data=data)
 
     def _fetch_documents(self, documents):
-        jobs = [gevent.spawn(document.fetch) for document in (doc for doc in self.documents if doc.name in documents and doc.supported)]
-        gevent.joinall(jobs, timeout=15)
+        workers = [Worker.spawn(document.fetch) for document in (doc for doc in self.documents if doc.name in documents and doc.supported)]
+        try:
+            while workers:
+                worker = workers.pop()
+                worker.wait()
+        finally:
+            for worker in workers:
+                worker.wait_ex()
 
     def _save_journal(self):
         try:
-            self.storage.save('journal', pickle.dumps(self.journal))
+            self.storage.save('journal', cPickle.dumps(self.journal))
         except XCAPStorageError:
             pass
 

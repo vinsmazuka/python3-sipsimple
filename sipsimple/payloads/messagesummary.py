@@ -5,7 +5,7 @@ Message summary and Message Waiting Indication handling according to RFC3842
 
 import re
 
-from io import StringIO
+from cStringIO import StringIO
 from application.configuration.datatypes import Boolean
 
 from sipsimple.payloads import ValidationError
@@ -22,7 +22,6 @@ class MessageSummary(object):
 
     @classmethod
     def parse(cls, content):
-        content = content.decode() if isinstance(content, bytes) else content
         message = StringIO(content)
         summary = cls()
         tmp_headers = []
@@ -60,7 +59,7 @@ class MessageSummary(object):
         if self.message_account:
             data += "Message-Account: %s\r\n" % self.message_account
         if self.summaries:
-            for k, v in list(self.summaries.items()):
+            for k, v in self.summaries.iteritems():
                 data += "%s: %s/%s (%s/%s)\r\n" % (k.title(), v['new_messages'], v['old_messages'], v['new_urgent_messages'], v['old_urgent_messages'])
         if self.optional_headers:
             data += "\r\n"

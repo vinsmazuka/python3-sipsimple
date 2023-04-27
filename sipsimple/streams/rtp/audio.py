@@ -2,7 +2,7 @@
 __all__ = ['AudioStream']
 
 from application.notification import NotificationCenter, NotificationData
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.audio import AudioBridge, AudioDevice, IAudioPort, WaveRecorder
 from sipsimple.configuration.settings import SIPSimpleSettings
@@ -10,8 +10,8 @@ from sipsimple.core import AudioTransport, PJSIPError, SIPCoreError
 from sipsimple.streams.rtp import RTPStream
 
 
-@implementer(IAudioPort)
 class AudioStream(RTPStream):
+    implements(IAudioPort)
 
     type = 'audio'
     priority = 1
@@ -62,7 +62,7 @@ class AudioStream(RTPStream):
             settings = SIPSimpleSettings()
             self._transport.start(local_sdp, remote_sdp, stream_index, timeout=settings.rtp.timeout)
             self._save_remote_sdp_rtp_info(remote_sdp, stream_index)
-            self._check_hold(self._transport.direction.decode(), True)
+            self._check_hold(self._transport.direction, True)
             if self._try_ice and self._ice_state == "NULL":
                 self.state = 'WAIT_ICE'
             else:
@@ -85,11 +85,9 @@ class AudioStream(RTPStream):
                 old_producer_slot = self.producer_slot
                 self.notification_center.remove_observer(self, sender=self._transport)
                 self._transport.stop()
-                available_codecs = self.session.account.rtp.audio_codec_list or settings.rtp.audio_codec_list
-                codecs = list(c.encode() for c in available_codecs)
                 try:
-                    self._transport = AudioTransport(self.mixer, self._rtp_transport, remote_sdp, stream_index, codecs=codecs)
-                except SIPCoreError as e:
+                    self._transport = AudioTransport(self.mixer, self._rtp_transport, remote_sdp, stream_index, codecs=list(self.session.account.rtp.audio_codec_list or settings.rtp.audio_codec_list))
+                except SIPCoreError, e:
                     self.state = "ENDED"
                     self._failure_reason = e.args[0]
                     self.notification_center.post_notification('MediaStreamDidFail', sender=self, data=NotificationData(context='update', reason=self._failure_reason))
@@ -99,14 +97,14 @@ class AudioStream(RTPStream):
                 self.notification_center.post_notification('AudioPortDidChangeSlots', sender=self, data=NotificationData(consumer_slot_changed=True, producer_slot_changed=True,
                                                                                                                          old_consumer_slot=old_consumer_slot, new_consumer_slot=self.consumer_slot,
                                                                                                                          old_producer_slot=old_producer_slot, new_producer_slot=self.producer_slot))
-                if connection.address == b'0.0.0.0' and remote_sdp.media[stream_index].direction == b'sendrecv':
-                    self._transport.update_direction(b'recvonly')
-                self._check_hold(self._transport.direction.decode(), False)
+                if connection.address == '0.0.0.0' and remote_sdp.media[stream_index].direction == 'sendrecv':
+                    self._transport.update_direction('recvonly')
+                self._check_hold(self._transport.direction, False)
                 self.notification_center.post_notification('RTPStreamDidChangeRTPParameters', sender=self)
             else:
                 new_direction = local_sdp.media[stream_index].direction
                 self._transport.update_direction(new_direction)
-                self._check_hold(new_direction.decode(), False)
+                self._check_hold(new_direction, False)
             self._save_remote_sdp_rtp_info(remote_sdp, stream_index)
             self._transport.update_sdp(local_sdp, remote_sdp, stream_index)
             self._hold_request = None
@@ -140,9 +138,9 @@ class AudioStream(RTPStream):
     def reset(self, stream_index):
         with self._lock:
             if self.direction == "inactive" and not self.on_hold_by_local:
-                new_direction = b"sendrecv"
+                new_direction = "sendrecv"
                 self._transport.update_direction(new_direction)
-                self._check_hold(new_direction.decode(), False)
+                self._check_hold(new_direction, False)
                 # TODO: do a full reset, re-creating the AudioTransport, so that a new offer
                 # would contain all codecs and ICE would be renegotiated -Saul
 
@@ -152,7 +150,7 @@ class AudioStream(RTPStream):
                 raise RuntimeError("AudioStream.send_dtmf() cannot be used in %s state" % self.state)
             try:
                 self._transport.send_dtmf(digit)
-            except PJSIPError as e:
+            except PJSIPError, e:
                 if not e.args[0].endswith("(PJ_ETOOMANY)"):
                     raise
 
@@ -183,8 +181,7 @@ class AudioStream(RTPStream):
 
     def _create_transport(self, rtp_transport, remote_sdp=None, stream_index=None):
         settings = SIPSimpleSettings()
-        available_codecs = self.session.account.rtp.audio_codec_list or settings.rtp.audio_codec_list
-        codecs = list(c.encode() for c in available_codecs)
+        codecs = list(self.session.account.rtp.audio_codec_list or settings.rtp.audio_codec_list)
         return AudioTransport(self.mixer, rtp_transport, remote_sdp=remote_sdp, sdp_index=stream_index or 0, codecs=codecs)
 
     def _check_hold(self, direction, is_initial):
@@ -213,7 +210,7 @@ class AudioStream(RTPStream):
             self.notification_center.post_notification('AudioStreamWillStartRecording', sender=self, data=NotificationData(filename=self._audio_rec.filename))
             try:
                 self._audio_rec.start()
-            except SIPCoreError as e:
+            except SIPCoreError, e:
                 self._audio_rec = None
                 self.notification_center.post_notification('AudioStreamDidStopRecording', sender=self, data=NotificationData(filename=self._audio_rec.filename, reason=e.args[0]))
                 return

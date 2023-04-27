@@ -18,7 +18,8 @@ from sipsimple import log, __version__
 from sipsimple.core._core import PJSIPUA, PJ_VERSION, PJ_SVN_REVISION, SIPCoreError
 
 
-class Engine(Thread, metaclass=Singleton):
+class Engine(Thread):
+    __metaclass__ = Singleton
     default_start_options = {"ip_address": None,
                              "udp_port": 0,
                              "tcp_port": None,
@@ -28,7 +29,7 @@ class Engine(Thread, metaclass=Singleton):
                              "tls_cert_file": None,
                              "tls_privkey_file": None,
                              "tls_timeout": 3000,
-                             "user_agent":  "sipsimple-%s-pjsip-%s-r%s" % (__version__, PJ_VERSION, PJ_SVN_REVISION),
+                             "user_agent": "sipsimple-%s-pjsip-%s-r%s" % (__version__, PJ_VERSION, PJ_SVN_REVISION),
                              "log_level": 0,
                              "trace_sip": False,
                              "detect_sip_loops": True,
@@ -68,7 +69,7 @@ class Engine(Thread, metaclass=Singleton):
             ua_attributes = [attr for attr in dir(self._ua) if not attr.startswith('__') and attr != 'poll']
         else:
             ua_attributes = []
-        return sorted(set(dir(self.__class__) + list(self.__dict__.keys()) + ua_attributes))
+        return sorted(set(dir(self.__class__) + self.__dict__.keys() + ua_attributes))
 
     def __getattr__(self, attr):
         if attr not in ["_ua", "poll"] and hasattr(self, "_ua") and attr in dir(self._ua):
@@ -101,14 +102,6 @@ class Engine(Thread, metaclass=Singleton):
         self.notification_center.post_notification('SIPEngineWillStart', sender=self)
         init_options = Engine.default_start_options.copy()
         init_options.update(self._options)
-        for k in list(init_options['events'].keys()):
-            if isinstance(k, str):
-                init_options['events'][k.encode()] = init_options['events'][k]
-                del(init_options['events'][k])
-
-        for k in list(init_options['events'].keys()):
-            init_options['events'][k] = list(v.encode() if isinstance(v, str) else v for v in init_options['events'][k])
-
         try:
             self._ua = PJSIPUA(self._handle_event, **init_options)
         except Exception:
@@ -124,9 +117,8 @@ class Engine(Thread, metaclass=Singleton):
         while not self._thread_stopping:
             try:
                 failed = self._ua.poll()
-            except Exception as e:
+            except:
                 log.exception('Exception occurred while running the Engine')
-                traceback.print_exc()
                 exc_type, exc_val, exc_tb = sys.exc_info()
                 self.notification_center.post_notification('SIPEngineGotException', sender=self, data=NotificationData(type=exc_type, value=exc_val, traceback="".join(traceback.format_exception(exc_type, exc_val, exc_tb))))
                 failed = True

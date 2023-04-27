@@ -18,11 +18,10 @@ __all__ = ['Route', 'ContactURIFactory', 'NoGRUU', 'PublicGRUU', 'TemporaryGRUU'
 class Route(object):
     _default_ports = dict(udp=5060, tcp=5060, tls=5061)
 
-    def __init__(self, address, port=None, transport='udp', tls_name=None):
-        self.address = address.decode() if isinstance(address, bytes) else address
-        self.transport = transport.decode() if isinstance(transport, bytes) else transport
-        self.tls_name = tls_name.decode() if isinstance(tls_name, bytes) else tls_name
+    def __init__(self, address, port=None, transport='udp'):
+        self.address = address
         self.port = port
+        self.transport = transport
 
     @property
     def address(self):
@@ -63,13 +62,11 @@ class Route(object):
     @property
     def uri(self):
         port = None if self._default_ports[self.transport] == self.port else self.port
-        parameters = {} if self.transport == 'udp' else {'transport': self.transport.encode()}
-        if self.transport == 'tls':
-            parameters['tls_name'] = self.tls_name.encode() if self.tls_name else None
+        parameters = {} if self.transport == 'udp' else {'transport': self.transport}
         return SIPURI(host=self.address, port=port, parameters=parameters)
 
     def __repr__(self):
-        return '{0.__class__.__name__}({0.address!r}, port={0.port!r}, transport={0.transport!r}, tls_name={0.tls_name!r})'.format(self)
+        return '{0.__class__.__name__}({0.address!r}, port={0.port!r}, transport={0.transport!r})'.format(self)
 
     def __str__(self):
         return str(self.uri)
@@ -77,11 +74,11 @@ class Route(object):
 
 class ContactURIType(MarkerType): pass
 
-class NoGRUU(metaclass=ContactURIType):                   pass
-class PublicGRUU(metaclass=ContactURIType):               pass
-class TemporaryGRUU(metaclass=ContactURIType):            pass
-class PublicGRUUIfAvailable(metaclass=ContactURIType):    pass
-class TemporaryGRUUIfAvailable(metaclass=ContactURIType): pass
+class NoGRUU:                   __metaclass__ = ContactURIType
+class PublicGRUU:               __metaclass__ = ContactURIType
+class TemporaryGRUU:            __metaclass__ = ContactURIType
+class PublicGRUUIfAvailable:    __metaclass__ = ContactURIType
+class TemporaryGRUUIfAvailable: __metaclass__ = ContactURIType
 
 
 class ContactURIFactory(object):
@@ -100,10 +97,10 @@ class ContactURIFactory(object):
                 raise KeyError("unsupported contact type: %r" % contact_type)
         else:
             contact_type = NoGRUU
-        if not isinstance(key, (str, Route)):
+        if not isinstance(key, (basestring, Route)):
             raise KeyError("key must be a transport name or Route instance")
 
-        transport = key if isinstance(key, str) else key.transport
+        transport = key if isinstance(key, basestring) else key.transport
         parameters = {} if transport == 'udp' else {'transport': transport}
 
         if contact_type is PublicGRUU:
@@ -119,7 +116,7 @@ class ContactURIFactory(object):
         elif contact_type is TemporaryGRUUIfAvailable and self.temporary_gruu is not None:
             uri = SIPURI.new(self.temporary_gruu)
         else:
-            ip = host.default_ip if isinstance(key, str) else host.outgoing_ip_for(key.address)
+            ip = host.default_ip if isinstance(key, basestring) else host.outgoing_ip_for(key.address)
             if ip is None:
                 raise KeyError("could not get outgoing IP address")
             port = getattr(Engine(), '%s_port' % transport, None)

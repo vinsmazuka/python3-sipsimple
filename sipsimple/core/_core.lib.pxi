@@ -41,7 +41,7 @@ cdef class PJSIPEndpoint:
         cdef pjsip_tpmgr *tpmgr
         cdef int status
 
-        if ip_address is not None and not _is_valid_ip(pj_AF_INET(), ip_address.encode()):
+        if ip_address is not None and not _is_valid_ip(pj_AF_INET(), ip_address):
             raise ValueError("Not a valid IPv4 address: %s" % ip_address)
         self._local_ip_used = ip_address
 
@@ -108,7 +108,7 @@ cdef class PJSIPEndpoint:
             raise SIPCoreError("Invalid port: %d" % port)
         if ip_address is not None and ip_address is not "0.0.0.0":
             local_ip_p = &local_ip_pj
-            _str_to_pj_str(ip_address.encode(), local_ip_p)
+            _str_to_pj_str(ip_address, local_ip_p)
         status = pj_sockaddr_in_init(local_addr, local_ip_p, port)
         if status != 0:
             raise PJSIPError("Could not create local address", status)
@@ -146,7 +146,7 @@ cdef class PJSIPEndpoint:
         self._make_local_addr(&local_addr, self._local_ip_used, port)
         pjsip_tls_setting_default(&tls_setting)
         # The following value needs to be reasonably low, as TLS negotiation hogs the PJSIP polling loop
-        tls_setting.timeout.sec = <long>(self._tls_timeout / 1000)
+        tls_setting.timeout.sec = self._tls_timeout / 1000
         tls_setting.timeout.msec = self._tls_timeout % 1000
         if self._tls_ca_file is not None:
             tls_setting.ca_list_file = self._tls_ca_file.pj_str
@@ -181,13 +181,13 @@ cdef class PJSIPEndpoint:
         if resolver == NULL:
             raise SIPCoreError("Could not get DNS resolver on endpoint")
 
-        pj_servers = <pj_str_t *> malloc(sizeof(pj_str_t))
+        pj_servers = <pj_str_t *> malloc(sizeof(pj_str_t)*num_servers)
         if pj_servers == NULL:
             raise MemoryError()
 
-	# set only 1st nameserver
-        _str_to_pj_str(servers[0].encode(), &pj_servers[0])
-        status = pj_dns_resolver_set_ns(resolver, 1, pj_servers, NULL)
+        for i, ns in enumerate(servers):
+            _str_to_pj_str(ns, &pj_servers[i])
+        status = pj_dns_resolver_set_ns(resolver, num_servers, pj_servers, NULL)
         free(pj_servers)
         if status != 0:
             raise PJSIPError("Could not set nameservers on DNS resolver", status)
@@ -269,7 +269,7 @@ cdef class PJMEDIAEndpoint:
         if status != 0:
             raise PJSIPError("Could not initialize ffmpeg video codecs", status)
         self._has_ffmpeg_video = 1
-        status = pjmedia_codec_vpx_vid_init(NULL, &caching_pool._obj.factory)
+        status = pjmedia_codec_vpx_init(NULL, &caching_pool._obj.factory)
         if status != 0:
             raise PJSIPError("Could not initialize vpx video codecs", status)
         self._has_vpx = 1
@@ -284,7 +284,7 @@ cdef class PJMEDIAEndpoint:
         if self._has_ffmpeg_video:
             pjmedia_codec_ffmpeg_vid_deinit()
         if self._has_vpx:
-            pjmedia_codec_vpx_vid_deinit()
+            pjmedia_codec_vpx_deinit()
         if pjmedia_vid_codec_mgr_instance() != NULL:
             pjmedia_vid_codec_mgr_destroy(NULL)
         if pjmedia_event_mgr_instance() != NULL:
@@ -298,6 +298,7 @@ cdef class PJMEDIAEndpoint:
         cdef unsigned int count = PJMEDIA_CODEC_MGR_MAX_CODECS
         cdef pjmedia_codec_info info[PJMEDIA_CODEC_MGR_MAX_CODECS]
         cdef unsigned int prio[PJMEDIA_CODEC_MGR_MAX_CODECS]
+        cdef int i
         cdef list retval
         cdef int status
         status = pjmedia_codec_mgr_enum_codecs(pjmedia_endpt_get_codec_mgr(self._obj), &count, info, prio)
@@ -305,7 +306,7 @@ cdef class PJMEDIAEndpoint:
             raise PJSIPError("Could not get available codecs", status)
         retval = list()
         for i from 0 <= i < count:
-            retval.append((prio[i], _pj_str_to_bytes(info[i].encoding_name), info[i].channel_cnt, info[i].clock_rate))
+            retval.append((prio[i], _pj_str_to_str(info[i].encoding_name), info[i].channel_cnt, info[i].clock_rate))
         return retval
 
     cdef list _get_all_codecs(self):
@@ -329,10 +330,10 @@ cdef class PJMEDIAEndpoint:
         cdef object codec_set
         cdef list codecs
         cdef tuple codec_data
-        cdef object codec
+        cdef str codec
         cdef int sample_rate
         cdef int channel_count
-        cdef object codec_name
+        cdef str codec_name
         cdef int prio
         cdef list codec_prio
         cdef pj_str_t codec_pj
@@ -342,26 +343,25 @@ cdef class PJMEDIAEndpoint:
         all_codecs = set(self._get_all_codecs())
         codec_set = new_codecs.difference(all_codecs)
         if len(codec_set) > 0:
-            raise SIPCoreError("Unknown audio codecs: %s" % ", ".join(cdc.decode() for cdc in codec_set))
+            raise SIPCoreError("Unknown codec(s): %s" % ", ".join(codec_set))
         # reverse the codec data tuples so that we can easily sort on sample rate
         # to make sure that bigger sample rates get higher priority
         codecs = [list(reversed(codec_data)) for codec_data in self._get_codecs()]
         codecs.sort(reverse=True)
         codec_prio = list()
-        
         for codec in req_codecs:
             for sample_rate, channel_count, codec_name, prio in codecs:
                 if codec == codec_name and channel_count == 1:
-                    codec_prio.append("%s/%d/%d" % (codec_name.decode(), sample_rate, channel_count))
+                    codec_prio.append("%s/%d/%d" % (codec_name, sample_rate, channel_count))
         for prio, codec in enumerate(reversed(codec_prio)):
-            _str_to_pj_str(codec.encode(), &codec_pj)
+            _str_to_pj_str(codec, &codec_pj)
             status = pjmedia_codec_mgr_set_codec_priority(pjmedia_endpt_get_codec_mgr(self._obj), &codec_pj, prio + 1)
             if status != 0:
                 raise PJSIPError("Could not set codec priority", status)
         for sample_rate, channel_count, codec_name, prio in codecs:
             if codec_name not in req_codecs or channel_count > 1:
-                codec = "%s/%d/%d" % (codec_name.decode(), sample_rate, channel_count)
-                _str_to_pj_str(codec.encode(), &codec_pj)
+                codec = "%s/%d/%d" % (codec_name, sample_rate, channel_count)
+                _str_to_pj_str(codec, &codec_pj)
                 status = pjmedia_codec_mgr_set_codec_priority(pjmedia_endpt_get_codec_mgr(self._obj), &codec_pj, 0)
                 if status != 0:
                     raise PJSIPError("Could not set codec priority", status)
@@ -371,6 +371,7 @@ cdef class PJMEDIAEndpoint:
         cdef unsigned int count = PJMEDIA_VID_CODEC_MGR_MAX_CODECS
         cdef pjmedia_vid_codec_info info[PJMEDIA_VID_CODEC_MGR_MAX_CODECS]
         cdef unsigned int prio[PJMEDIA_VID_CODEC_MGR_MAX_CODECS]
+        cdef int i
         cdef list retval
         cdef int status
         status = pjmedia_vid_codec_mgr_enum_codecs(NULL, &count, info, prio)
@@ -379,7 +380,7 @@ cdef class PJMEDIAEndpoint:
         retval = list()
         for i from 0 <= i < count:
             if info[i].packings & PJMEDIA_VID_PACKING_PACKETS:
-                retval.append((prio[i], _pj_str_to_bytes(info[i].encoding_name), info[i].pt))
+                retval.append((prio[i], _pj_str_to_str(info[i].encoding_name), info[i].pt))
         return retval
 
     cdef list _get_all_video_codecs(self):
@@ -402,9 +403,9 @@ cdef class PJMEDIAEndpoint:
         cdef object codec_set
         cdef list codecs
         cdef tuple codec_data
-        cdef object codec
+        cdef str codec
         cdef int payload_type
-        cdef object codec_name
+        cdef str codec_name
         cdef int prio
         cdef list codec_prio
         cdef pj_str_t codec_pj
@@ -413,43 +414,44 @@ cdef class PJMEDIAEndpoint:
             raise ValueError("Requested video codec list contains doubles")
         codec_set = new_codecs.difference(set(self._get_all_video_codecs()))
         if len(codec_set) > 0:
-            raise SIPCoreError("Unknown video codecs: %s" % ", ".join(cdc.decode() for cdc in codec_set))
+            raise SIPCoreError("Unknown video codec(s): %s" % ", ".join(codec_set))
         codecs = self._get_video_codecs()
         codec_prio = list()
         for codec in req_codecs:
             for prio, codec_name, payload_type in codecs:
                 if codec == codec_name:
-                    codec_prio.append("%s/%d" % (codec_name.decode(), payload_type))
+                    codec_prio.append("%s/%d" % (codec_name, payload_type))
         for prio, codec in enumerate(reversed(codec_prio)):
-            _str_to_pj_str(codec.encode(), &codec_pj)
+            _str_to_pj_str(codec, &codec_pj)
             status = pjmedia_vid_codec_mgr_set_codec_priority(NULL, &codec_pj, prio + 1)
             if status != 0:
                 raise PJSIPError("Could not set video codec priority", status)
         for prio, codec_name, payload_type in codecs:
             if codec_name not in req_codecs:
-                codec = "%s/%d" % (codec_name.decode(), payload_type)
-                _str_to_pj_str(codec.encode(), &codec_pj)
+                codec = "%s/%d" % (codec_name, payload_type)
+                _str_to_pj_str(codec, &codec_pj)
                 status = pjmedia_vid_codec_mgr_set_codec_priority(NULL, &codec_pj, 0)
                 if status != 0:
                     raise PJSIPError("Could not set video codec priority", status)
         return 0
 
-    cdef void _set_h264_options(self, object profile, int level):
+    cdef void _set_h264_options(self, str profile, int level):
         global h264_profiles_map, h264_profile_level_id, h264_packetization_mode
 
         cdef unsigned int count = PJMEDIA_VID_CODEC_MGR_MAX_CODECS
         cdef pjmedia_vid_codec_info info[PJMEDIA_VID_CODEC_MGR_MAX_CODECS]
         cdef pjmedia_vid_codec_param vparam
         cdef unsigned int prio[PJMEDIA_VID_CODEC_MGR_MAX_CODECS]
+        cdef int i
         cdef int status
         cdef PJSTR h264_profile_level_id_value
-        cdef PJSTR h264_packetization_mode_value = PJSTR(b"1")    # TODO; make it configurable?
+        cdef PJSTR h264_packetization_mode_value = PJSTR("1")    # TODO; make it configurable?
 
         try:
             profile_n = h264_profiles_map[profile]
         except KeyError:
             raise ValueError("invalid profile specified: %s" % profile)
-        h264_profile_level_id_value = PJSTR(b"%xe0%x" % (profile_n, level))    # use common subset (e0)
+        h264_profile_level_id_value = PJSTR("%xe0%x" % (profile_n, level))    # use common subset (e0)
 
         status = pjmedia_vid_codec_mgr_enum_codecs(NULL, &count, info, prio)
         if status != 0:
@@ -457,7 +459,7 @@ cdef class PJMEDIAEndpoint:
         for i from 0 <= i < count:
             if not (info[i].packings & PJMEDIA_VID_PACKING_PACKETS):
                 continue
-            if _pj_str_to_bytes(info[i].encoding_name) != b'H264':
+            if _pj_str_to_str(info[i].encoding_name) != 'H264':
                 continue
             status = pjmedia_vid_codec_mgr_get_default_param(NULL, &info[i], &vparam)
             if status != 0:
@@ -479,6 +481,7 @@ cdef class PJMEDIAEndpoint:
         cdef pjmedia_vid_codec_info info[PJMEDIA_VID_CODEC_MGR_MAX_CODECS]
         cdef pjmedia_vid_codec_param vparam
         cdef unsigned int prio[PJMEDIA_VID_CODEC_MGR_MAX_CODECS]
+        cdef int i
         cdef int status
 
         max_width, max_height = max_resolution
@@ -526,23 +529,19 @@ cdef void _transport_state_cb(pjsip_transport *tp, pjsip_transport_state state, 
 
     if pj_sockaddr_has_addr(&tp.local_addr):
         pj_sockaddr_print(&tp.local_addr, buf, 512, 0)
-        local_address = '%s:%d' % (_buf_to_str(buf), pj_sockaddr_get_port(&tp.local_addr))
+        local_address = '%s:%d' % (PyString_FromString(buf), pj_sockaddr_get_port(&tp.local_addr))
     else:
         local_address = None
-
-    transport = tp.type_name.decode().lower()
     remote_address = '%s:%d' % (_pj_str_to_str(tp.remote_name.host), tp.remote_name.port)
-    event_dict = dict(transport=transport, local_address=local_address, remote_address=remote_address)
-    
+    event_dict = dict(transport=tp.type_name.lower(), local_address=local_address, remote_address=remote_address)
     if state == PJSIP_TP_STATE_CONNECTED:
         _add_event("SIPEngineTransportDidConnect", event_dict)
     else:
-        reason = _pj_status_to_str(info.status)
-        event_dict['reason'] = reason
+        event_dict['reason'] = _pj_status_to_str(info.status)
         _add_event("SIPEngineTransportDidDisconnect", event_dict)
 
 
 # globals
-cdef PJSTR h264_profile_level_id = PJSTR(b"profile-level-id")
-cdef PJSTR h264_packetization_mode = PJSTR(b"packetization-mode")
+cdef PJSTR h264_profile_level_id = PJSTR("profile-level-id")
+cdef PJSTR h264_packetization_mode = PJSTR("packetization-mode")
 cdef dict h264_profiles_map = dict(baseline=66, main=77, high=100)

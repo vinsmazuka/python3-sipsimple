@@ -1,4 +1,4 @@
-# cython: language_level=3
+# cython: language_level=2
 
 cdef extern from *:
     ctypedef char *char_ptr_const "const char *"
@@ -15,7 +15,7 @@ from libc.string cimport memcpy
 
 from cpython.float cimport PyFloat_AsDouble
 from cpython.ref cimport Py_INCREF, Py_DECREF
-from cpython.bytes cimport PyBytes_FromString, PyBytes_FromStringAndSize, PyBytes_AsString, PyBytes_Size
+from cpython.string cimport PyString_FromString, PyString_FromStringAndSize, PyString_AsString, PyString_Size
 
 cdef extern from "Python.h":
     object PyUnicode_FromString(const char *u)
@@ -906,8 +906,8 @@ cdef extern from "pjmedia-codec.h":
     int pjmedia_codec_register_audio_codecs(pjmedia_endpt *endpt, const pjmedia_audio_codec_config *c) nogil
     int pjmedia_codec_ffmpeg_vid_init(pjmedia_vid_codec_mgr *mgr, pj_pool_factory *pf) nogil
     int pjmedia_codec_ffmpeg_vid_deinit() nogil
-    int pjmedia_codec_vpx_vid_init(pjmedia_vid_codec_mgr *mgr, pj_pool_factory *pf) nogil
-    int pjmedia_codec_vpx_vid_deinit() nogil
+    int pjmedia_codec_vpx_init(pjmedia_vid_codec_mgr *mgr, pj_pool_factory *pf) nogil
+    int pjmedia_codec_vpx_deinit() nogil
 
 cdef extern from "pjsip.h":
 
@@ -1235,7 +1235,6 @@ cdef extern from "pjsip.h":
         PJSIP_EFAILEDCREDENTIAL
     enum pjsip_cred_data_type:
         PJSIP_CRED_DATA_PLAIN_PASSWD
-        PJSIP_CRED_DATA_DIGEST
     struct pjsip_cred_info:
         pj_str_t realm
         pj_str_t scheme
@@ -1254,6 +1253,8 @@ cdef extern from "pjsip.h":
     struct pjsip_dlg_party:
         pjsip_contact_hdr *contact
         pjsip_fromto_hdr *info
+        int first_cseq;
+        int cseq;
     struct pjsip_dialog:
         pjsip_auth_clt_sess auth_sess
         pjsip_cid_hdr *call_id
@@ -1471,7 +1472,7 @@ cdef class PJMEDIAEndpoint(object):
     cdef void _audio_subsystem_shutdown(self)
     cdef void _video_subsystem_init(self, PJCachingPool caching_pool)
     cdef void _video_subsystem_shutdown(self)
-    cdef void _set_h264_options(self, object profile, int level)
+    cdef void _set_h264_options(self, str profile, int level)
     cdef void _set_video_options(self, tuple max_resolution, int max_framerate, float max_bitrate)
 
 # core.helper
@@ -1485,18 +1486,16 @@ cdef class BaseCredentials(object):
 
 cdef class Credentials(BaseCredentials):
     # attributes
-    cdef object _username
-    cdef object _realm
-    cdef object _password
-    cdef bint _digest
+    cdef str _username
+    cdef str _realm
+    cdef str _password
 
 cdef class FrozenCredentials(BaseCredentials):
     # attributes
     cdef int initialized
-    cdef readonly object username
-    cdef readonly object realm
-    cdef readonly object password
-    cdef readonly bint digest
+    cdef readonly str username
+    cdef readonly str realm
+    cdef readonly str password
 
 cdef class BaseSIPURI(object):
     pass
@@ -1731,6 +1730,9 @@ cdef class FrozenSubjectHeader(BaseSubjectHeader):
 cdef class BaseReplacesHeader(object):
     pass
 
+cdef class BaseGatewayIdHeader(object):
+    pass
+
 cdef class ReplacesHeader(BaseReplacesHeader):
     # attributes
     cdef public str call_id
@@ -1739,7 +1741,24 @@ cdef class ReplacesHeader(BaseReplacesHeader):
     cdef public int early_only
     cdef dict _parameters
 
+cdef class GatewayIdHeader(BaseGatewayIdHeader):
+    # attributes
+    cdef public str call_id
+    cdef public str from_tag
+    cdef public str to_tag
+    cdef public int early_only
+    cdef dict _parameters
+
 cdef class FrozenReplacesHeader(BaseReplacesHeader):
+    # attributes
+    cdef int initialized
+    cdef readonly str call_id
+    cdef readonly str from_tag
+    cdef readonly str to_tag
+    cdef readonly int early_only
+    cdef readonly frozendict parameters
+
+cdef class FrozenGatewayIdHeader(BaseGatewayIdHeader):
     # attributes
     cdef int initialized
     cdef readonly str call_id
@@ -1780,15 +1799,9 @@ cdef FrozenReplacesHeader FrozenReplacesHeader_create(pjsip_replaces_hdr *header
 # core.util
 
 cdef int _str_to_pj_str(object string, pj_str_t *pj_str) except -1
-cdef object _pj_str_to_bytes(pj_str_t pj_bytes)
 cdef object _pj_str_to_str(pj_str_t pj_str)
 cdef object _pj_status_to_str(int status)
 cdef object _pj_status_to_def(int status)
-cdef object _buf_to_str(object buf)
-cdef object _str_as_str(object string)
-cdef object _str_as_size(object string)
-
-
 cdef dict _pjsip_param_to_dict(pjsip_param *param_list)
 cdef int _dict_to_pjsip_param(object params, pjsip_param *param_list, pj_pool_t *pool)
 cdef int _pjsip_msg_to_dict(pjsip_msg *msg, dict info_dict) except -1
@@ -1801,7 +1814,7 @@ cdef int _BaseRouteHeader_to_pjsip_route_hdr(BaseIdentityHeader header, pjsip_ro
 
 # core.ua
 
-ctypedef int (*timer_callback)(object, object) except -1
+ctypedef int (*timer_callback)(object, object) except -1 with gil
 cdef class Timer(object):
     # attributes
     cdef int _scheduled
@@ -1939,7 +1952,7 @@ cdef class RecordingWaveFile(object):
     cdef pj_mutex_t *_lock
     cdef pj_pool_t *_pool
     cdef pjmedia_port *_port
-    cdef readonly object filename
+    cdef readonly str filename
     cdef readonly AudioMixer mixer
 
     # private methods
@@ -1955,7 +1968,7 @@ cdef class WaveFile(object):
     cdef pj_mutex_t *_lock
     cdef pj_pool_t *_pool
     cdef pjmedia_port *_port
-    cdef readonly object filename
+    cdef readonly str filename
     cdef readonly AudioMixer mixer
 
     # private methods
@@ -1981,7 +1994,7 @@ cdef int cb_play_wav_eof(pjmedia_port *port, void *user_data) with gil
 # core.video
 
 cdef class VideoFrame(object):
-    cdef readonly object data
+    cdef readonly str data
     cdef readonly int width
     cdef readonly int height
 
@@ -2192,7 +2205,7 @@ cdef class Subscription(object):
     cdef int _timeout_timer_active
     cdef pj_timer_entry _refresh_timer
     cdef int _refresh_timer_active
-    cdef readonly str state
+    cdef readonly object state
     cdef readonly EndpointAddress peer_address
     cdef readonly FrozenFromHeader from_header
     cdef readonly FrozenToHeader to_header
@@ -2216,7 +2229,7 @@ cdef class Subscription(object):
     cdef int _cancel_timers(self, PJSIPUA ua, int cancel_timeout, int cancel_refresh) except -1
     cdef int _send_subscribe(self, PJSIPUA ua, int expires, pj_time_val *timeout,
                              object extra_headers, object content_type, object body) except -1
-    cdef int _cb_state(self, PJSIPUA ua, str state, int code, object reason, dict headers) except -1
+    cdef int _cb_state(self, PJSIPUA ua, object state, int code, object reason, dict headers) except -1
     cdef int _cb_got_response(self, PJSIPUA ua, pjsip_rx_data *rdata) except -1
     cdef int _cb_notify(self, PJSIPUA ua, pjsip_rx_data *rdata) except -1
     cdef int _cb_timeout_timer(self, PJSIPUA ua)
@@ -2233,17 +2246,17 @@ cdef class IncomingSubscription(object):
     cdef pjsip_transaction *_initial_tsx
     cdef int _expires
     cdef readonly str state
-    cdef readonly object event
+    cdef readonly str event
     cdef readonly str call_id
     cdef readonly EndpointAddress peer_address
 
     # methods
     cdef int _set_state(self, str state) except -1
     cdef PJSIPUA _get_ua(self, int raise_exception)
-    cdef int init(self, PJSIPUA ua, pjsip_rx_data *rdata, object event) except -1
+    cdef int init(self, PJSIPUA ua, pjsip_rx_data *rdata, str event) except -1
     cdef int _send_initial_response(self, int code) except -1
-    cdef int _send_notify(self, object reason=*) except -1
-    cdef int _terminate(self, PJSIPUA ua, object reason, int do_cleanup) except -1
+    cdef int _send_notify(self, str reason=*) except -1
+    cdef int _terminate(self, PJSIPUA ua, str reason, int do_cleanup) except -1
     cdef int _cb_rx_refresh(self, PJSIPUA ua, pjsip_rx_data *rdata) except -1
     cdef int _cb_server_timeout(self, PJSIPUA ua) except -1
     cdef int _cb_tsx(self, PJSIPUA ua, pjsip_event *event) except -1
@@ -2269,16 +2282,16 @@ cdef class BaseSDPConnection(object):
 
 cdef class SDPConnection(BaseSDPConnection):
     # attributes
-    cdef object _address
-    cdef object _net_type
-    cdef object _address_type
+    cdef str _address
+    cdef str _net_type
+    cdef str _address_type
 
 cdef class FrozenSDPConnection(BaseSDPConnection):
     # attributes
     cdef int initialized
-    cdef readonly object address
-    cdef readonly object net_type
-    cdef readonly object address_type
+    cdef readonly str address
+    cdef readonly str net_type
+    cdef readonly str address_type
 
 cdef class SDPAttributeList(list):
     pass
@@ -2301,12 +2314,12 @@ cdef class BaseSDPSession(object):
 
 cdef class SDPSession(BaseSDPSession):
     # attributes
-    cdef object _address
-    cdef object _user
-    cdef object _net_type
-    cdef object _address_type
-    cdef object _name
-    cdef object _info
+    cdef str _address
+    cdef str _user
+    cdef str _net_type
+    cdef str _address_type
+    cdef str _name
+    cdef str _info
     cdef SDPConnection _connection
     cdef list _attributes
     cdef list _bandwidth_info
@@ -2318,14 +2331,14 @@ cdef class SDPSession(BaseSDPSession):
 cdef class FrozenSDPSession(BaseSDPSession):
     # attributes
     cdef int initialized
-    cdef readonly object address
+    cdef readonly str address
     cdef readonly unsigned int id
     cdef readonly unsigned int version
-    cdef readonly object user
-    cdef readonly object net_type
-    cdef readonly object address_type
-    cdef readonly object name
-    cdef readonly object info
+    cdef readonly str user
+    cdef readonly str net_type
+    cdef readonly str address_type
+    cdef readonly str name
+    cdef readonly str info
     cdef readonly FrozenSDPConnection connection
     cdef readonly int start_time
     cdef readonly int stop_time
@@ -2342,11 +2355,11 @@ cdef class BaseSDPMediaStream(object):
 
 cdef class SDPMediaStream(BaseSDPMediaStream):
     # attributes
-    cdef object _media
-    cdef object _transport
+    cdef str _media
+    cdef str _transport
     cdef list _formats
     cdef list _codec_list
-    cdef object _info
+    cdef str _info
     cdef SDPConnection _connection
     cdef SDPAttributeList _attributes
     cdef SDPBandwidthInfoList _bandwidth_info
@@ -2357,13 +2370,13 @@ cdef class SDPMediaStream(BaseSDPMediaStream):
 cdef class FrozenSDPMediaStream(BaseSDPMediaStream):
     # attributes
     cdef int initialized
-    cdef readonly object media
+    cdef readonly str media
     cdef readonly int port
-    cdef readonly object transport
+    cdef readonly str transport
     cdef readonly int port_count
     cdef readonly frozenlist formats
     cdef readonly frozenlist codec_list
-    cdef readonly object info
+    cdef readonly str info
     cdef readonly FrozenSDPConnection connection
     cdef readonly FrozenSDPAttributeList attributes
     cdef readonly FrozenSDPBandwidthInfoList bandwidth_info
@@ -2377,14 +2390,14 @@ cdef class BaseSDPAttribute(object):
 
 cdef class SDPAttribute(BaseSDPAttribute):
     # attributes
-    cdef object _name
-    cdef object _value
+    cdef str _name
+    cdef str _value
 
 cdef class FrozenSDPAttribute(BaseSDPAttribute):
     # attributes
     cdef int initialized
-    cdef readonly object name
-    cdef readonly object value
+    cdef readonly str name
+    cdef readonly str value
 
 cdef class BaseSDPBandwidthInfo(object):
     # attributes
@@ -2395,13 +2408,13 @@ cdef class BaseSDPBandwidthInfo(object):
 
 cdef class SDPBandwidthInfo(BaseSDPBandwidthInfo):
     # attributes
-    cdef object _modifier
-    cdef object _value
+    cdef str _modifier
+    cdef int _value
 
 cdef class FrozenSDPBandwidthInfo(BaseSDPBandwidthInfo):
     # attributes
     cdef int initialized
-    cdef readonly object modifier
+    cdef readonly str modifier
     cdef readonly int value
 
 cdef SDPSession SDPSession_create(pjmedia_sdp_session_ptr_const pj_session)
@@ -2554,7 +2567,7 @@ cdef class RTPTransport(object):
     cdef pjmedia_transport *_obj
     cdef pjmedia_transport *_wrapped_transport
     cdef ICECheck _rtp_valid_pair
-    cdef object _encryption
+    cdef str _encryption
     cdef readonly object ice_stun_address
     cdef readonly object ice_stun_port
     cdef readonly object state
@@ -2599,7 +2612,7 @@ cdef class AudioTransport(object):
 
     # private methods
     cdef PJSIPUA _check_ua(self)
-    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1
+    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1 with gil
 
 cdef class VideoTransport(object):
     # attributes
@@ -2621,7 +2634,7 @@ cdef class VideoTransport(object):
 
     # private methods
     cdef PJSIPUA _check_ua(self)
-    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1
+    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1 with gil
 
 cdef void _RTPTransport_cb_ice_complete(pjmedia_transport *tp, pj_ice_strans_op op, int status) with gil
 cdef void _RTPTransport_cb_ice_state(pjmedia_transport *tp, pj_ice_strans_state prev, pj_ice_strans_state curr) with gil

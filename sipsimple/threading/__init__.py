@@ -22,7 +22,9 @@ class CallFunctionEvent(object):
         self.kw = kw
 
 
-class ThreadManager(object, metaclass=Singleton):
+class ThreadManager(object):
+    __metaclass__ = Singleton
+
     def __init__(self):
         self.threads = {}
         self.lock = Lock()
@@ -42,7 +44,7 @@ class ThreadManager(object, metaclass=Singleton):
 
     def stop(self):
         with self.lock:
-            threads = list(self.threads.values())
+            threads = self.threads.values()
             self.threads = {}
         for thread in threads:
             thread.stop()

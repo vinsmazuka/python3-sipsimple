@@ -2,6 +2,7 @@
 include "_core.error.pxi"
 include "_core.lib.pxi"
 include "_core.sound.pxi"
+include "_core.pipe.pxi"
 include "_core.video.pxi"
 include "_core.util.pxi"
 
@@ -21,13 +22,13 @@ include "_core.mediatransport.pxi"
 
 PJ_VERSION = pj_get_version()
 PJ_SVN_REVISION = int(PJ_SVN_REV)
-CORE_REVISION = 210
+CORE_REVISION = 181
 
 # exports
 
 __all__ = ["PJ_VERSION", "PJ_SVN_REVISION", "CORE_REVISION",
            "SIPCoreError", "PJSIPError", "PJSIPTLSError", "SIPCoreInvalidStateError",
-           "AudioMixer", "ToneGenerator", "RecordingWaveFile", "WaveFile", "MixerPort",
+           "AudioMixer", "ToneGenerator", "RecordingWaveFile", "WaveFile", "MixerPort", "PipeFile", "RecordingPipeFile",
            "VideoCamera", "FrameBufferVideoRenderer",
            "sip_status_messages",
            "BaseCredentials", "Credentials", "FrozenCredentials", "BaseSIPURI", "SIPURI", "FrozenSIPURI",
@@ -42,6 +43,7 @@ __all__ = ["PJ_VERSION", "PJ_SVN_REVISION", "CORE_REVISION",
            "BaseReferToHeader", "ReferToHeader", "FrozenReferToHeader",
            "BaseSubjectHeader", "SubjectHeader", "FrozenSubjectHeader",
            "BaseReplacesHeader", "ReplacesHeader", "FrozenReplacesHeader",
+           "BaseGatewayIdHeader", "GatewayIdHeader", "FrozenGatewayIdHeader",
            "Request",
            "Referral",
            "sipfrag_re",

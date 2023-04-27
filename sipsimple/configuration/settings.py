@@ -23,9 +23,9 @@ class EchoCancellerSettings(SettingsGroup):
 
 
 class AudioSettings(SettingsGroup):
-    alert_device = Setting(type=str, default='system_default', nillable=True)
-    input_device = Setting(type=str, default='system_default', nillable=True)
-    output_device = Setting(type=str, default='system_default', nillable=True)
+    alert_device = Setting(type=unicode, default=u'system_default', nillable=True)
+    input_device = Setting(type=unicode, default=u'system_default', nillable=True)
+    output_device = Setting(type=unicode, default=u'system_default', nillable=True)
     sample_rate = Setting(type=SampleRate, default=44100)
     muted = RuntimeSetting(type=bool, default=False)
     silent = Setting(type=bool, default=False)
@@ -38,7 +38,7 @@ class H264Settings(SettingsGroup):
 
 
 class VideoSettings(SettingsGroup):
-    device = Setting(type=str, default='system_default', nillable=True)
+    device = Setting(type=unicode, default=u'system_default', nillable=True)
     resolution = Setting(type=VideoResolution, default=VideoResolution('1280x720'))
     framerate = Setting(type=int, default=25)
     max_bitrate = Setting(type=float, default=None, nillable=True)
@@ -68,8 +68,8 @@ class LogsSettings(SettingsGroup):
 class RTPSettings(SettingsGroup):
     port_range = Setting(type=PortRange, default=PortRange(50000, 50500))
     timeout = Setting(type=NonNegativeInteger, default=30)
-    audio_codec_list = Setting(type=AudioCodecList, default=AudioCodecList(('opus', 'G722', 'PCMU', 'PCMA', 'speex', 'iLBC', 'GSM')))
-    video_codec_list = Setting(type=VideoCodecList, default=VideoCodecList(('H264', 'VP8', 'VP9')))
+    audio_codec_list = Setting(type=AudioCodecList, default=AudioCodecList(('opus', 'G722', 'PCMU', 'PCMA')))
+    video_codec_list = Setting(type=VideoCodecList, default=VideoCodecList(('H264', 'VP8')))
 
 
 def sip_port_validator(port, sibling_port):
@@ -86,8 +86,7 @@ class SIPSettings(SettingsGroup):
 
 class TLSSettings(SettingsGroup):
     ca_list = Setting(type=Path, default=None, nillable=True)
-    certificate = Setting(type=Path, default=None, nillable=True)
-    verify_server = Setting(type=bool, default=False)
+
 
 class SIPSimpleSettings(SettingsObject):
     __id__ = 'SIPSimpleSettings'

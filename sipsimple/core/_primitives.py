@@ -11,13 +11,13 @@ from threading import RLock
 
 from application.notification import IObserver, NotificationCenter, NotificationData
 from application.python import Null
-from zope.interface import implementer
+from zope.interface import implements
 
 from sipsimple.core._core import ContactHeader, Header, Request, RouteHeader, SIPCoreError, SIPURI, ToHeader
 
 
-@implementer(IObserver)
 class Registration(object):
+    implements(IObserver)
 
     def __init__(self, from_header, credentials=None, duration=300, extra_headers=None):
         self.from_header = from_header
@@ -38,7 +38,7 @@ class Registration(object):
         with self._lock:
             try:
                 self._make_and_send_request(contact_header, route_header, timeout, True)
-            except SIPCoreError as e:
+            except SIPCoreError, e:
                 notification_center = NotificationCenter()
                 notification_center.post_notification('SIPRegistrationDidFail', sender=self, data=NotificationData(code=0, reason=e.args[0], route_header=route_header))
 
@@ -50,7 +50,7 @@ class Registration(object):
             notification_center.post_notification('SIPRegistrationWillEnd', sender=self)
             try:
                 self._make_and_send_request(ContactHeader.new(self._last_request.contact_header), RouteHeader.new(self._last_request.route_header), timeout, False)
-            except SIPCoreError as e:
+            except SIPCoreError, e:
                 notification_center.post_notification('SIPRegistrationDidNotEnd', sender=self, data=NotificationData(code=0, reason=e.args[0]))
 
     def handle_notification(self, notification):
@@ -124,9 +124,7 @@ class Registration(object):
         extra_headers = []
         extra_headers.append(Header("Expires", str(int(self.duration) if do_register else 0)))
         extra_headers.extend(self.extra_headers)
-        uri = SIPURI(self.from_header.uri.host)
-        to_header = ToHeader.new(self.from_header)
-        request = Request("REGISTER", uri, self.from_header, to_header, route_header,
+        request = Request("REGISTER", SIPURI(self.from_header.uri.host), self.from_header, ToHeader.new(self.from_header), route_header,
                           credentials=self.credentials, contact_header=contact_header, call_id=call_id,
                           cseq=cseq, extra_headers=extra_headers)
         notification_center.add_observer(self, sender=request)
@@ -143,11 +141,11 @@ class Registration(object):
         self._current_request = request
 
 
-@implementer(IObserver)
 class Message(object):
+    implements(IObserver)
 
     def __init__(self, from_header, to_header, route_header, content_type, body, credentials=None, extra_headers=None):
-        self._request = Request("MESSAGE", to_header.uri, from_header, to_header, route_header, credentials=credentials, extra_headers=extra_headers, content_type=content_type, body=body if isinstance(body, bytes) else body.encode())
+        self._request = Request("MESSAGE", to_header.uri, from_header, to_header, route_header, credentials=credentials, extra_headers=extra_headers, content_type=content_type, body=body)
         self._lock = RLock()
 
     from_header = property(lambda self: self._request.from_header)
@@ -193,8 +191,8 @@ class PublicationError(Exception): pass
 class PublicationETagError(PublicationError): pass
 
 
-@implementer(IObserver)
 class Publication(object):
+    implements(IObserver)
 
     def __init__(self, from_header, event, content_type, credentials=None, duration=300, extra_headers=None):
         self.from_header = from_header
@@ -230,7 +228,7 @@ class Publication(object):
             notification_center.post_notification('SIPPublicationWillEnd', sender=self)
             try:
                 self._make_and_send_request(None, RouteHeader.new(self._last_request.route_header), timeout, False)
-            except SIPCoreError as e:
+            except SIPCoreError, e:
                 notification_center.post_notification('SIPPublicationDidNotEnd', sender=self, data=NotificationData(code=0, reason=e.args[0]))
 
     def handle_notification(self, notification):

@@ -1,7 +1,7 @@
 
 """Audio support"""
 
-
+from __future__ import absolute_import
 
 __all__ = ['IAudioPort', 'AudioDevice', 'AudioBridge', 'RootAudioBridge', 'AudioConference', 'WavePlayer', 'WavePlayerError', 'WaveRecorder']
 
@@ -15,7 +15,7 @@ from application.notification import IObserver, NotificationCenter, Notification
 from application.system import makedirs
 from eventlib import coros
 from twisted.internet import reactor
-from zope.interface import Attribute, Interface, implementer
+from zope.interface import Attribute, Interface, implements
 
 from sipsimple.core import MixerPort, RecordingWaveFile, SIPCoreError, WaveFile
 from sipsimple.threading import run_in_twisted_thread
@@ -52,7 +52,6 @@ class IAudioPort(Interface):
     producer_slot = Attribute("The slot from which audio data can be read")
 
 
-@implementer(IAudioPort)
 class AudioDevice(object):
     """
     Objects of this class represent an audio device which can be used in an
@@ -61,6 +60,8 @@ class AudioDevice(object):
     AudioDevice constructed for a specific mixer represents the device that
     mixer is using.
     """
+
+    implements(IAudioPort)
 
     def __init__(self, mixer, input_muted=False, output_muted=False):
         self.mixer = mixer
@@ -108,7 +109,6 @@ class AudioDevice(object):
                                                                                                             old_consumer_slot=old_consumer_slot, new_consumer_slot=self.consumer_slot))
 
 
-@implementer(IAudioPort, IObserver)
 class AudioBridge(object):
     """
     An AudioBridge is a container for objects providing the IAudioPort interface.
@@ -120,6 +120,8 @@ class AudioBridge(object):
     is a tree (i.e. no loops are allowed). All leafs of the tree will be
     connected as if they were the children of a single bridge.
     """
+
+    implements(IAudioPort, IObserver)
 
     def __init__(self, mixer):
         self._lock = RLock()
@@ -252,7 +254,6 @@ class AudioBridge(object):
                 self.ports.discard(portwr)
 
 
-@implementer(IObserver)
 class RootAudioBridge(object):
     """
     A RootAudioBridge is a container for objects providing the IAudioPort
@@ -263,6 +264,8 @@ class RootAudioBridge(object):
     RootAudioBridge does not implement the IAudioPort interface. This makes it
     more efficient.
     """
+
+    implements(IObserver)
 
     def __init__(self, mixer):
         self.mixer = mixer
@@ -389,13 +392,13 @@ class AudioConference(object):
             self.on_hold = False
 
 
-@implementer(IAudioPort, IObserver)
 class WavePlayer(object):
     """
     An object capable of playing a WAV file. It can be used as part of an
     AudioBridge as it implements the IAudioPort interface.
     """
 
+    implements(IAudioPort, IObserver)
 
     def __init__(self, mixer, filename, volume=100, loop_count=1, pause_time=0, initial_delay=0):
         self.mixer = mixer
@@ -455,7 +458,7 @@ class WavePlayer(object):
                     self._wave_file.volume = self.volume
                     try:
                         self._wave_file.start()
-                    except SIPCoreError as e:
+                    except SIPCoreError, e:
                         notification_center.post_notification('WavePlayerDidFail', sender=self, data=NotificationData(error=e))
                         raise WavePlayerError(e)
                     else:
@@ -493,12 +496,13 @@ class WavePlayer(object):
             self._channel.send(Command('reschedule'))
 
 
-@implementer(IAudioPort)
 class WaveRecorder(object):
     """
     An object capable of recording to a WAV file. It can be used as part of an
     AudioBridge as it implements the IAudioPort interface.
     """
+
+    implements(IAudioPort)
 
     def __init__(self, mixer, filename):
         self.mixer = mixer

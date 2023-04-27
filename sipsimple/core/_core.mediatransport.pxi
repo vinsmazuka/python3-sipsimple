@@ -312,7 +312,7 @@ cdef class RTPTransport:
                 srtp_info = <pjmedia_srtp_info *> pjmedia_transport_info_get_spc_info(&info, PJMEDIA_TRANSPORT_TYPE_SRTP)
                 if srtp_info == NULL or not bool(srtp_info.active):
                     return None
-                return _pj_str_to_bytes(srtp_info.tx_policy.name)
+                return _pj_str_to_str(srtp_info.tx_policy.name)
             finally:
                 with nogil:
                     pj_mutex_unlock(lock)
@@ -397,7 +397,7 @@ cdef class RTPTransport:
             pj_remote_sdp = NULL
         if sdp_index < 0:
             raise ValueError("sdp_index argument cannot be negative")
-        if sdp_index >= <int>pj_local_sdp.media_count:
+        if sdp_index >= pj_local_sdp.media_count:
             raise ValueError("sdp_index argument out of range")
         with nogil:
             status = pjmedia_transport_media_create(transport, pool, 0, pj_remote_sdp, sdp_index)
@@ -488,6 +488,7 @@ cdef class RTPTransport:
     def set_INIT(self):
         global _ice_cb
         cdef int af
+        cdef int i
         cdef int status
         cdef int port
         cdef pj_caching_pool *caching_pool
@@ -723,7 +724,7 @@ cdef class RTPTransport:
                 with nogil:
                     multistr_params = pjmedia_transport_zrtp_getMultiStreamParameters(self._obj, &length)
                 if length > 0:
-                    ret = _pj_buf_len_to_str(multistr_params, length)
+                    ret = PyString_FromStringAndSize(multistr_params, length)
                     free(multistr_params)
                     return ret
                 else:
@@ -757,7 +758,7 @@ cdef class RTPTransport:
                 zrtp_info = <pjmedia_zrtp_info *> pjmedia_transport_info_get_spc_info(&info, PJMEDIA_TRANSPORT_TYPE_ZRTP)
                 if zrtp_info == NULL or not bool(zrtp_info.active):
                     return None
-                return _buf_to_str(zrtp_info.cipher)
+                return PyString_FromString(zrtp_info.cipher)
             finally:
                 with nogil:
                     pj_mutex_unlock(lock)
@@ -799,7 +800,7 @@ cdef class RTPTransport:
                 with nogil:
                     pj_mutex_unlock(lock)
 
-        def __set__(self, object name):
+        def __set__(self, basestring name):
             cdef int status
             cdef char* c_name
             cdef pj_mutex_t *lock = self._lock
@@ -822,6 +823,7 @@ cdef class RTPTransport:
                 zrtp_info = <pjmedia_zrtp_info *> pjmedia_transport_info_get_spc_info(&info, PJMEDIA_TRANSPORT_TYPE_ZRTP)
                 if zrtp_info == NULL or not bool(zrtp_info.active):
                     return
+                name = name.encode('utf-8')
                 c_name = name
                 with nogil:
                     pjmedia_transport_zrtp_putPeerName(self._obj, c_name)
@@ -859,7 +861,7 @@ cdef class RTPTransport:
                 if status <= 0:
                     return None
                 else:
-                    return _pj_buf_len_to_str(<char*>name, 12)
+                    return PyString_FromStringAndSize(<char*>name, 12)
             finally:
                 with nogil:
                     pj_mutex_unlock(lock)
@@ -881,13 +883,12 @@ cdef class RTPTransport:
             pj_remote_sdp = NULL
         if sdp_index < 0:
             raise ValueError("sdp_index argument cannot be negative")
-        if sdp_index >= <int>pj_local_sdp.media_count:
+        if sdp_index >= pj_local_sdp.media_count:
             raise ValueError("sdp_index argument out of range")
         # Remove ICE and SRTP/ZRTP related attributes from SDP, they will be added by pjmedia_transport_encode_sdp
         local_media = local_sdp.media[sdp_index]
         local_media.attributes = [<object> attr for attr in local_media.attributes if attr.name not in ('crypto', 'zrtp-hash', 'ice-ufrag', 'ice-pwd', 'ice-mismatch', 'candidate', 'remote-candidates')]
         pj_local_sdp = local_sdp.get_sdp_session()
-
         with nogil:
             status = pjmedia_transport_encode_sdp(transport, pool, pj_local_sdp, pj_remote_sdp, sdp_index)
         if status != 0:
@@ -1076,7 +1077,7 @@ cdef class AudioTransport:
             if self._obj == NULL:
                 return None
             else:
-                return _pj_str_to_bytes(self._stream_info.fmt.encoding_name)
+                return _pj_str_to_str(self._stream_info.fmt.encoding_name)
 
     property sample_rate:
 
@@ -1192,7 +1193,7 @@ cdef class AudioTransport:
         if status != 0:
             raise PJSIPError("failed to acquire lock", status)
         try:
-            is_offer = remote_sdp is None
+            is_offer = remote_sdp == None
             if is_offer and direction not in valid_sdp_directions:
                 raise SIPCoreError("Unknown direction: %s" % direction)
             self._sdp_info.index = index
@@ -1208,14 +1209,14 @@ cdef class AudioTransport:
             if is_offer:
                 direction_attr = direction
             else:
-                if self.direction is None or "recv" in self.direction.decode():
-                    direction_attr = b"sendrecv"
+                if self.direction is None or "recv" in self.direction:
+                    direction_attr = "sendrecv"
                 else:
-                    direction_attr = b"sendonly"
-            local_media.attributes.append(SDPAttribute(direction_attr, b""))
+                    direction_attr = "sendonly"
+            local_media.attributes.append(SDPAttribute(direction_attr, ""))
             for attribute in local_media.attributes:
-                if attribute.name == b'rtcp':
-                    attribute.value = (attribute.value.decode().split(' ', 1)[0]).encode()
+                if attribute.name == 'rtcp':
+                    attribute.value = attribute.value.split(' ', 1)[0]
             self._sdp_info.local_media = local_media
             return local_media
         finally:
@@ -1419,7 +1420,7 @@ cdef class AudioTransport:
                 raise SIPCoreError("Stream is not active")
             if len(digit) != 1 or digit not in "0123456789*#ABCD":
                 raise SIPCoreError("Not a valid DTMF digit: %s" % digit)
-            _str_to_pj_str(digit.encode(), &digit_pj)
+            _str_to_pj_str(digit, &digit_pj)
             if not self._stream_info.tx_event_pt < 0:
                 # If the remote doesn't support telephone-event just don't send DTMF
                 with nogil:
@@ -1430,7 +1431,7 @@ cdef class AudioTransport:
             with nogil:
                 pj_mutex_unlock(lock)
 
-    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1:
+    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1 with gil:
         cdef int status
         cdef pj_mutex_t *lock = self._lock
         cdef pjmedia_rtcp_stat stat
@@ -1596,7 +1597,7 @@ cdef class VideoTransport:
             if self._obj == NULL:
                 return None
             else:
-                return _pj_str_to_bytes(self._stream_info.codec_info.encoding_name)
+                return _pj_str_to_str(self._stream_info.codec_info.encoding_name)
 
     property sample_rate:
 
@@ -1660,7 +1661,7 @@ cdef class VideoTransport:
         if status != 0:
             raise PJSIPError("failed to acquire lock", status)
         try:
-            is_offer = remote_sdp is None
+            is_offer = remote_sdp == None
             if is_offer and direction not in valid_sdp_directions:
                 raise SIPCoreError("Unknown direction: %s" % direction)
             self._sdp_info.index = index
@@ -1676,14 +1677,14 @@ cdef class VideoTransport:
             if is_offer:
                 direction_attr = direction
             else:
-                if self.direction is None or "recv" in self.direction.decode():
-                    direction_attr = b"sendrecv"
+                if self.direction is None or "recv" in self.direction:
+                    direction_attr = "sendrecv"
                 else:
-                    direction_attr = b"sendonly"
-            local_media.attributes.append(SDPAttribute(direction_attr, b""))
+                    direction_attr = "sendonly"
+            local_media.attributes.append(SDPAttribute(direction_attr, ""))
             for attribute in local_media.attributes:
                 if attribute.name == 'rtcp':
-                    attribute.value = (attribute.value.decode().split(' ', 1)[0]).encode()
+                    attribute.value = attribute.value.split(' ', 1)[0]
             return local_media
         finally:
             with nogil:
@@ -1965,7 +1966,7 @@ cdef class VideoTransport:
             with nogil:
                 pj_mutex_unlock(lock)
 
-    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1:
+    cdef int _cb_check_rtp(self, MediaCheckTimer timer) except -1 with gil:
         cdef int status
         cdef pj_mutex_t *lock = self._lock
         cdef pjmedia_rtcp_stat stat
@@ -2042,11 +2043,11 @@ cdef ICECandidate ICECandidate_create(pj_ice_sess_cand *cand):
         cand_type = 'UNKNOWN'
 
     pj_sockaddr_print(&cand.addr, buf, PJ_INET6_ADDRSTRLEN, 0)
-    address = _buf_to_str(buf)
+    address = PyString_FromString(buf)
     port = pj_sockaddr_get_port(&cand.addr)
     if pj_sockaddr_has_addr(&cand.rel_addr):
         pj_sockaddr_print(&cand.rel_addr, buf, PJ_INET6_ADDRSTRLEN, 0)
-        rel_addr = _buf_to_str(buf)
+        rel_addr = PyString_FromString(buf)
     else:
         rel_addr = ''
 
@@ -2353,7 +2354,7 @@ cdef void _RTPTransport_cb_zrtp_show_sas(pjmedia_transport *tp, char* sas, int v
        rtp_transport = _extract_rtp_transport(tp)
        if rtp_transport is None:
            return
-       _add_event("RTPTransportZRTPReceivedSAS", dict(obj=rtp_transport, sas=bytes(sas), verified=bool(verified)))
+       _add_event("RTPTransportZRTPReceivedSAS", dict(obj=rtp_transport, sas=str(sas), verified=bool(verified)))
    except:
        ua._handle_exception(1)
 
@@ -2385,11 +2386,8 @@ cdef void _RTPTransport_cb_zrtp_show_message(pjmedia_transport *tp, int severity
         if rtp_transport is None:
             return
         level = zrtp_message_levels.get(severity, 1)
-        if severity == 2 and sub_code in (5, 6, 7):
-            pass
-        else:
-            message = zrtp_error_messages[level].get(sub_code, 'Unknown')
-            _add_event("RTPTransportZRTPLog", dict(obj=rtp_transport, level=level, message=message))
+        message = zrtp_error_messages[level].get(sub_code, 'Unknown')
+        _add_event("RTPTransportZRTPLog", dict(obj=rtp_transport, level=level, message=message))
     except:
         ua._handle_exception(1)
 
@@ -2477,7 +2475,7 @@ _ice_cb.on_ice_complete = _RTPTransport_cb_ice_complete
 _ice_cb.on_ice_state = _RTPTransport_cb_ice_state
 _ice_cb.on_ice_stop = _RTPTransport_cb_ice_stop
 
-valid_sdp_directions = (b"sendrecv", b"sendonly", b"recvonly", b"inactive")
+valid_sdp_directions = ("sendrecv", "sendonly", "recvonly", "inactive")
 
 # ZRTP
 
